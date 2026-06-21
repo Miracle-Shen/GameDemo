@@ -1,0 +1,51 @@
+{
+  "source": "BATCH_IMG_GEN",
+  "generated_at": "2026-06-19T11:30:10.425Z",
+  "pages": [
+    {
+      "scene_id": "mine_home",
+      "file_name": "page_mine_home.webp",
+      "local_path": "assets/refs/design-sheets/page_mine_home.webp",
+      "image_url": "",
+      "mime_type": "",
+      "task_id": "",
+      "model": ""
+    },
+    {
+      "scene_id": "endless_mine",
+      "file_name": "page_endless_mine.webp",
+      "local_path": "assets/refs/design-sheets/page_endless_mine.webp",
+      "image_url": "",
+      "mime_type": "",
+      "task_id": "",
+      "model": ""
+    },
+    {
+      "scene_id": "modal_confirm_return",
+      "file_name": "page_modal_confirm_return.webp",
+      "local_path": "assets/refs/design-sheets/page_modal_confirm_return.webp",
+      "image_url": "https://game.kg.qq.com/walle-img-gen/output/RvprgE6Y9eOGtsceR8uNL.png",
+      "mime_type": "image/webp",
+      "task_id": "WK8dYZG74pxUzIGWk1HfT",
+      "model": "gpt-image-2"
+    },
+    {
+      "scene_id": "modal_result",
+      "file_name": "page_modal_result.webp",
+      "local_path": "assets/refs/design-sheets/page_modal_result.webp",
+      "image_url": "",
+      "mime_type": "",
+      "task_id": "",
+      "model": ""
+    },
+    {
+      "scene_id": "modal_blocker",
+      "file_name": "page_modal_blocker.webp",
+      "local_path": "assets/refs/design-sheets/page_modal_blocker.webp",
+      "image_url": "",
+      "mime_type": "",
+      "task_id": "",
+      "model": ""
+    }
+  ]
+}

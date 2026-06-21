@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>需求-场景清单 - 编辑器</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f5f5f5; padding: 20px; color: #333; font-size: 13px; }
+h1 { font-size: 22px; margin-bottom: 12px; }
+.toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+.btn { padding: 7px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; }
+.btn-primary { background: #1677ff; color: #fff; }
+.btn-primary:hover { background: #4096ff; }
+.btn-green { background: #52c41a; color: #fff; }
+.btn-green:hover { background: #73d13d; }
+.btn-secondary { background: #fff; color: #333; border: 1px solid #ddd; }
+.btn-secondary:hover { background: #f9f9f9; }
+.badge { background: #ff4d4f; color: #fff; border-radius: 10px; padding: 2px 7px; font-size: 11px; margin-left: 6px; }
+.hint { color: #999; font-size: 12px; }
+
+#app { display: flex; flex-direction: column; gap: 14px; max-width: 1100px; }
+.scene { background: #fff; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border-left: 4px solid #1677ff; padding: 14px 16px; display: flex; gap: 18px; align-items: flex-start; }
+.scene.modified { background: #fffbe6; border-left-color: #faad14; }
+.scene.added { background: #f6ffed; border-left-color: #52c41a; }
+.scene.deleted { background: #fff1f0; border-left-color: #ff4d4f; opacity: 0.6; }
+.scene.deleted .scene-main { text-decoration: line-through; }
+.scene-main { flex: 1; min-width: 0; }
+.scene-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.scene-idx { flex-shrink: 0; width: 30px; height: 30px; border-radius: 50%; background: #1677ff; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 14px; }
+.scene.added .scene-idx { background: #52c41a; }
+.scene.deleted .scene-idx { background: #ff4d4f; }
+.scene-name { flex: 1; font-size: 15px; font-weight: 600; padding: 6px 10px; border: 1px solid transparent; border-radius: 6px; background: #fafafa; }
+.scene-name:hover { border-color: #d9d9d9; }
+.scene-name:focus { border-color: #1677ff; outline: none; background: #fff; }
+.field { display: flex; align-items: center; gap: 8px; }
+.field-label { color: #888; font-size: 12px; white-space: nowrap; }
+.viz-input { font-family: "SF Mono", "JetBrains Mono", Menlo, monospace; font-size: 12px; padding: 5px 9px; border: 1px solid #d9d9d9; border-radius: 6px; width: 280px; background: #fff; }
+.viz-input:focus { border-color: #1677ff; outline: none; }
+.viz-input.invalid { border-color: #ff4d4f; background: #fff1f0; color: #cf1322; }
+.viz-err { color: #cf1322; font-size: 11px; display: none; }
+.viz-err.show { display: inline; }
+.scene-actions { display: flex; gap: 4px; align-items: center; }
+.scene-actions button { background: none; border: 1px solid #eee; border-radius: 5px; cursor: pointer; font-size: 14px; padding: 3px 7px; line-height: 1.2; color: #555; }
+.scene-actions button:hover { background: #f0f0f0; border-color: #d9d9d9; }
+.scene-visual { width: 220px; flex-shrink: 0; position: sticky; top: 20px; align-self: flex-start; }
+.scene-visual img { width: 100%; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); border: 1px solid #e0e0e0; }
+.viz-placeholder { padding: 20px 12px; border: 2px dashed #ddd; border-radius: 8px; text-align: center; color: #999; font-size: 12px; line-height: 1.6; }
+
+.add-scene-btn { margin-top: 4px; padding: 10px; background: #fff; border: 2px dashed #1677ff; color: #1677ff; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; max-width: 1100px; }
+.add-scene-btn:hover { background: #e6f4ff; }
+
+.modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; }
+.modal-overlay.show { display: flex; }
+.modal { background: #fff; border-radius: 12px; padding: 24px; max-width: 800px; width: 90%; max-height: 80vh; overflow-y: auto; }
+.modal h2 { font-size: 18px; margin-bottom: 16px; }
+.modal pre { background: #f5f5f5; padding: 16px; border-radius: 8px; font-size: 12px; white-space: pre-wrap; word-break: break-all; max-height: 50vh; overflow-y: auto; }
+.modal .actions { margin-top: 16px; display: flex; gap: 8px; justify-content: flex-end; }
+</style>
+<style>
+  :root { --pl-topbar-h: 0px; }
+  .pl-topbar { position: sticky; top: 0; z-index: 900;
+    font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    box-shadow: 0 2px 8px rgba(0,0,0,.18); }
+  .pl-topbar .pl-bar { display: flex; align-items: center; gap: 12px; padding: 8px 16px;
+    background: #1f2937; color: #e5e7eb; }
+  .pl-topbar.has-todos .pl-bar { background: #78350f; box-shadow: inset 4px 0 0 #f59e0b; }
+  .pl-topbar .pl-dots { display: flex; gap: 5px; flex-shrink: 0; }
+  .pl-topbar .pl-dot { width: 10px; height: 10px; border-radius: 50%; background: #4b5563; }
+  .pl-topbar .pl-dot.done { background: #10b981; }
+  .pl-topbar .pl-dot.current { background: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,.35); }
+  .pl-topbar .pl-dot.blocked { background: #f59e0b; box-shadow: 0 0 0 2px rgba(245,158,11,.35); }
+  .pl-topbar .pl-label { font-weight: 600; color: #fff; white-space: nowrap; }
+  .pl-topbar .pl-todo-hint { color: #fcd34d; white-space: nowrap; font-weight: 600; }
+  .pl-topbar .pl-spacer { flex: 1; }
+  .pl-topbar a.pl-home { color: #93c5fd; text-decoration: none; white-space: nowrap; font-weight: 600; }
+  .pl-topbar.has-todos a.pl-home { color: #fde68a; }
+  .pl-topbar a.pl-home:hover { text-decoration: underline; }
+  /* 收起/展开按钮：默认展开，点击收起待办面板腾出阅读区 */
+  .pl-topbar .pl-toggle { flex-shrink: 0; cursor: pointer; font: inherit; font-weight: 600; color: inherit;
+    background: transparent; border: 1px solid rgba(255,255,255,.35); border-radius: 6px;
+    padding: 2px 10px; white-space: nowrap; }
+  .pl-topbar .pl-toggle:hover { background: rgba(255,255,255,.14); }
+  .pl-topbar.collapsed .pl-todos { display: none; }
+  /* 本产物待办面板：固定展开。红色=本产物规则/重要提示，橙色=待办 */
+  .pl-todos { background: #fffaf3; border-bottom: 2px solid #fa8c16;
+    padding: 12px 18px; max-height: 48vh; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 10px;
+    font-size: 13.5px; line-height: 1.7; }
+  /* 红色：规则 / 重要提示 */
+  .pl-note { display: flex; gap: 12px; align-items: flex-start;
+    background: #fff1f0; border: 1px solid #ffccc7; border-left: 5px solid #f5222d; border-radius: 10px;
+    padding: 12px 16px; color: #5c0011; box-shadow: 0 1px 4px rgba(245,34,45,0.12); }
+  .pl-note .pl-note-icon { flex-shrink: 0; font-size: 20px; line-height: 1.4; }
+  .pl-note .pl-note-body { flex: 1; }
+  .pl-note .pl-note-line { font-weight: 600; }
+  .pl-note .pl-note-line + .pl-note-line { margin-top: 4px; }
+  .pl-note b { color: #cf1322; }
+  /* 橙色：待办 */
+  .pl-todobox { display: flex; gap: 12px; align-items: flex-start;
+    background: #fff7e6; border: 1px solid #ffd591; border-left: 5px solid #fa8c16; border-radius: 10px;
+    padding: 12px 16px; color: #613400; box-shadow: 0 1px 4px rgba(250,140,22,0.12); }
+  .pl-todobox .pl-todobox-icon { flex-shrink: 0; font-size: 20px; line-height: 1.4; }
+  .pl-todobox .pl-todobox-body { flex: 1; }
+  .pl-todobox .pl-todobox-title { font-weight: 700; color: #d46b08; font-size: 14px; margin-bottom: 7px; }
+  .pl-todos .pl-gate { font-weight: 700; color: #d46b08; margin: 9px 0 5px; font-size: 13px; }
+  .pl-todos ul { margin: 0; padding: 0; list-style: none; }
+  .pl-todos li { display: flex; align-items: flex-start; gap: 9px; padding: 5px 0; }
+  .pl-todos li + li { border-top: 1px dashed #ffd591; }
+  /* 序号圆点 */
+  .pl-todos .pl-step-n { display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; border-radius: 50%; background: #fa8c16; color: #fff;
+    font-size: 11px; font-weight: 700; flex-shrink: 0; margin-top: 2px; }
+  .pl-todos .pl-todo-text { flex: 1; }
+  .pl-todos a.pl-todo-go { display: inline-block; margin-left: 8px; vertical-align: baseline;
+    color: #ad4e00; text-decoration: none; white-space: nowrap; font-weight: 600;
+    border: 1px solid #ffd666; border-radius: 5px; padding: 0 9px; background: #fff1b8; }
+  .pl-todos a.pl-todo-go:hover { background: #ffe58f; border-color: #fa8c16; }
+  .pl-todos .pl-todo-none { color: #237804; font-weight: 600; }
+  @media (prefers-color-scheme: dark) {
+    .pl-todos { background: #2a2118; border-bottom-color: #b45309; }
+  }
+  .pl-anchor-hl { background: #fffbeb; outline: 2px solid #fde68a; outline-offset: 2px;
+    border-radius: 4px; scroll-margin-top: calc(var(--pl-topbar-h) + 12px); }
+  /* 让页面内其他 sticky/fixed 元素让位给顶栏，互不遮挡 */
+  html { scroll-padding-top: calc(var(--pl-topbar-h) + 12px) !important; }
+  .toc { top: var(--pl-topbar-h) !important; height: calc(100vh - var(--pl-topbar-h)) !important; }
+  .edit-toolbar { top: var(--pl-topbar-h) !important; }
+  thead, thead th, table th { top: var(--pl-topbar-h) !important; }
+  .page-with-visual .page-visual, .page-visual, .scene-visual { top: calc(var(--pl-topbar-h) + 16px) !important; }
+</style>
+</head>
+<body>
+<div id="pl-topbar" class="pl-topbar" data-step="1">
+  <div class="pl-bar">
+    <div class="pl-dots"></div><span class="pl-label"></span><span class="pl-todo-hint"></span>
+    <span class="pl-spacer"></span>
+    <a class="pl-home" href="./流水线总览.html">📋 流水线总览 →</a>
+    <button type="button" class="pl-toggle" id="pl-toggle" aria-expanded="true">收起 ▲</button>
+  </div>
+  <div class="pl-todos" id="pl-todos"></div>
+</div>
+<script src="./pipeline-status.js"></script>
+<script>
+(function () {
+  var bar = document.getElementById("pl-topbar");
+  if (!bar) return;
+  var S = window.PIPELINE_STATUS;
+  var dots = bar.querySelector(".pl-dots");
+  var label = bar.querySelector(".pl-label");
+  var hint = bar.querySelector(".pl-todo-hint");
+  var panel = document.getElementById("pl-todos");
+  var toggle = document.getElementById("pl-toggle");
+  var fallback = Number(bar.getAttribute("data-step")) || 1;
+
+  // 顶栏实测高度写入 --pl-topbar-h，供页面内其他 sticky 元素让位（折叠/展开、resize 后重算）
+  function syncHeight() {
+    document.documentElement.style.setProperty("--pl-topbar-h", bar.offsetHeight + "px");
+  }
+
+  // 收起/展开：默认展开，状态按当前文件名持久化到 localStorage（刷新后保留）
+  var collapseKey;
+  try { collapseKey = "pl-collapse::" + ((location.pathname || "").split("/").pop() || "default"); }
+  catch (e) { collapseKey = "pl-collapse::default"; }
+  function applyCollapsed(collapsed) {
+    bar.classList.toggle("collapsed", collapsed);
+    if (toggle) {
+      toggle.textContent = collapsed ? "展开TODO ▼" : "收起TODO ▲";
+      toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    }
+    syncHeight();
+  }
+  if (toggle) {
+    toggle.addEventListener("click", function () {
+      var next = !bar.classList.contains("collapsed");
+      try { localStorage.setItem(collapseKey, next ? "1" : "0"); } catch (e) {}
+      applyCollapsed(next);
+    });
+  }
+  var savedCollapse = null;
+  try { savedCollapse = localStorage.getItem(collapseKey); } catch (e) {}
+
+  if (!S || !S.steps) {
+    label.textContent = "第 " + fallback + " 步";
+    panel.style.display = "none";
+    if (toggle) toggle.style.display = "none";  // 无待办面板可折叠，隐藏按钮
+    syncHeight();
+    return;
+  }
+  applyCollapsed(savedCollapse === "1");  // 默认展开
+  S.steps.forEach(function (st) {
+    var d = document.createElement("span");
+    d.className = "pl-dot " + st.status;
+    d.title = st.id + " " + st.name;
+    dots.appendChild(d);
+  });
+  var cur = S.steps.filter(function (s) { return s.id === S.current; })[0];
+  if (cur) label.textContent = S.current + "/" + S.steps.length + " " + cur.name;
+
+  // 只展示「本产物」的待办：按 todo.link 文件名与当前页面文件名匹配过滤
+  // （同一步可能跨多个产物，如元素清单校验步含 PRD 回补 + 元素清单编辑两门，各产物只看自己那部分）
+  var currentFile = "";
+  try { currentFile = decodeURIComponent((location.pathname || "").split("/").pop() || ""); }
+  catch (e) { currentFile = (location.pathname || "").split("/").pop() || ""; }
+  function baseName(p) { return String(p || "").split("/").pop(); }
+  // link 形如 "需求-最终PRD.html#reviewPanel" → { file, hash }
+  function parseLink(link) {
+    var s = String(link || ""); var i = s.indexOf("#");
+    return i >= 0 ? { file: s.slice(0, i), hash: s.slice(i + 1) } : { file: s, hash: "" };
+  }
+
+  var gates = (S.gates || []).map(function (g) {
+    var todos = (g.todos || []).filter(function (t) {
+      var f = parseLink(t.link).file;
+      return !currentFile || !f || baseName(f) === currentFile;
+    });
+    return { gateName: g.gateName, note: g.note, todos: todos };
+  }).filter(function (g) { return g.todos.length; });
+  var total = gates.reduce(function (n, g) { return n + g.todos.length; }, 0);
+  if (hint) hint.textContent = total > 0 ? "· 本产物 " + total + " 项待确认" : "· 本产物无待办";
+
+  var multiGate = gates.length > 1;
+  if (total > 0) {
+    bar.classList.add("has-todos");
+    var htmlStr = "";
+
+    // 红色：本产物规则 / 重要提示（note 可为字符串或数组）
+    var notes = [];
+    gates.forEach(function (g) {
+      if (!g.note) return;
+      (Array.isArray(g.note) ? g.note : [g.note]).forEach(function (n) { if (n) notes.push(n); });
+    });
+    if (notes.length) {
+      htmlStr += '<div class="pl-note"><span class="pl-note-icon">⚠️</span><div class="pl-note-body">'
+        + notes.map(function (n) { return '<div class="pl-note-line">' + esc(n) + "</div>"; }).join("")
+        + "</div></div>";
+    }
+
+    // 橙色：待办列表（每条带序号圆点）
+    htmlStr += '<div class="pl-todobox"><span class="pl-todobox-icon">📝</span><div class="pl-todobox-body">';
+    htmlStr += '<div class="pl-todobox-title">TODO（' + total + "）</div>";
+    var seq = 0;
+    gates.forEach(function (g) {
+      if (multiGate && g.gateName) htmlStr += '<div class="pl-gate">' + esc(g.gateName) + "</div>";
+      htmlStr += "<ul>";
+      g.todos.forEach(function (t) {
+        seq += 1;
+        var pl = parseLink(t.link);
+        var sameFile = pl.file && baseName(pl.file) === currentFile;
+        var go = "";
+        if (t.action && /^[A-Za-z_$][\w$]*$/.test(t.action)) {
+          // 本产物内的 JS 动作（如导出变更记录）→ 「前往」直接调用页面内函数（拉起弹窗）
+          go = '<a class="pl-todo-go" href="#" data-action="' + esc(t.action) + '">前往 →</a>';
+        } else if (sameFile && pl.hash) {
+          // 本产物内有锚点 → 「前往」滚动到对应模块（hashchange 触发高亮 + scroll-padding 让位顶栏）
+          go = '<a class="pl-todo-go" href="#' + esc(pl.hash) + '">前往 →</a>';
+        } else if (pl.file && !sameFile) {
+          // 指向别的产物 → 「去处理」跨页跳转（带锚点，目标页自动高亮）
+          go = '<a class="pl-todo-go" href="' + esc(t.link) + '">去处理 →</a>';
+        }
+        htmlStr += '<li><span class="pl-step-n">' + seq + '</span><span class="pl-todo-text">' + esc(t.text || "") + go + "</span></li>";
+      });
+      htmlStr += "</ul>";
+    });
+    htmlStr += "</div></div>";
+
+    panel.innerHTML = htmlStr;
+
+    // 「前往」绑定页面内动作（data-action）→ 调用同文档全局函数（如 exportEdits 拉起变更记录弹窗）
+    panel.addEventListener("click", function (e) {
+      var a = e.target && e.target.closest && e.target.closest(".pl-todo-go[data-action]");
+      if (!a) return;
+      e.preventDefault();
+      var fn = a.getAttribute("data-action");
+      if (typeof window[fn] === "function") window[fn]();
+    });
+  } else {
+    panel.innerHTML = '<div class="pl-todobox"><span class="pl-todobox-icon">✅</span><div class="pl-todobox-body">'
+      + '<span class="pl-todo-none">✓ 本产物无需手动确认（其他产物待办见流水线总览）</span></div></div>';
+  }
+  syncHeight();
+  window.addEventListener("resize", syncHeight);
+  window.addEventListener("load", syncHeight);
+
+  function esc(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  // 锚点高亮：URL 带 #xxx 时给目标元素加高亮类（先清掉上一个，避免多次跳转累积）
+  function hl() {
+    var id = decodeURIComponent((location.hash || "").slice(1));
+    if (!id) return;
+    var el = document.getElementById(id);
+    if (!el) return;
+    Array.prototype.forEach.call(document.querySelectorAll(".pl-anchor-hl"), function (p) {
+      if (p !== el) p.classList.remove("pl-anchor-hl");
+    });
+    el.classList.add("pl-anchor-hl");
+  }
+  hl();
+  window.addEventListener("hashchange", hl);
+})();
+</script>
+<h1>需求-场景清单 编辑器</h1>
+<div class="toolbar">
+  <button class="btn btn-primary" onclick="exportChanges()">📋 导出编辑记录<span class="badge" id="changeBadge" style="display:none">0</span></button>
+  <button class="btn btn-secondary" onclick="exportFullMd()">📄 导出完整MD</button>
+  <button class="btn btn-secondary" onclick="resetAll()">↩️ 重置全部</button>
+  <span class="hint">视觉图命名：<code>page_</code> 前缀 + 小写 kebab-case + <code>.png</code></span>
+</div>
+<div id="app"></div>
+<button class="add-scene-btn" onclick="addScene()">＋ 新增场景</button>
+
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <h2 id="modalTitle">导出</h2>
+    <pre id="modalContent"></pre>
+    <div class="actions">
+      <button class="btn btn-primary" onclick="copyModal()">📋 复制</button>
+      <button class="btn btn-secondary" onclick="closeModal()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script id="scene-data" type="application/json">[{"name":"授权页面（默认头像/上传图片/不满足条件/生成中状态）","visualRef":"page_authorization.png","visualExists":false},{"name":"上传照片页面","visualRef":"page_photo-upload.png","visualExists":false},{"name":"表情包礼物上线底部弹窗","visualRef":"page_gift-online-bottom-modal.png","visualExists":false}]</script>
+<script id="preamble-data" type="application/json">"# 需求-场景清单\n\n> 本清单是 PRD §2.x 场景拆分的真相源。LLM 草拟，用户审核 + 调整 + 放图。\n> 每条声明一个独立设计稿（全屏页 / 弹窗 / 浮层 / 抽屉 同等对待，不区分路由层级）。\n> 每条只写场景名 + `视觉图:` 一行；**是否真的放了图由 `visual-refs/` 下对应文件存在与否决定**，无需在本清单里标\"有图/无图\"。\n\n## 场景列表"</script>
+<script>
+const VIZ_RE = /^page_[a-z0-9]+(?:-[a-z0-9]+)*\.png$/;
+const PREAMBLE = JSON.parse(document.getElementById('preamble-data').textContent);
+const originalData = JSON.parse(document.getElementById('scene-data').textContent);
+let data = JSON.parse(JSON.stringify(originalData));
+// 每条场景带一个稳定 uid，便于跨增删 / 调序追踪「原始 → 当前」对应关系
+data.forEach((s, i) => { s._uid = i; s._added = false; s._deleted = false; });
+let uidSeq = data.length;
+
+function esc(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+function vizValid(v) { return !v || VIZ_RE.test(v); }
+
+function render() {
+  const app = document.getElementById('app');
+  app.innerHTML = data.map((scene, i) => {
+    let vizImg = '';
+    if (scene.visualRef) {
+      // 仅原始命中过的图直接显示；新增 / 改名后的图名以占位提示（刷新页面后由脚本重新探测）
+      if (scene.visualExists && scene.visualRef === scene._origVisual) {
+        vizImg = '<div class="scene-visual"><img src="visual-refs/' + esc(scene.visualRef) + '" alt="' + esc(scene.name) + '" /></div>';
+      } else {
+        vizImg = '<div class="scene-visual"><div class="viz-placeholder">📷 ' + esc(scene.visualRef) + '<br>放入 visual-refs/ 后刷新页面预览</div></div>';
+      }
+    }
+    const cls = scene._deleted ? 'deleted' : scene._added ? 'added' : isModified(scene) ? 'modified' : '';
+    const invalid = !vizValid(scene.visualRef);
+    return `<div class="scene ${cls}">
+      <div class="scene-main">
+        <div class="scene-row">
+          <div class="scene-idx">${scene._deleted ? '✕' : i + 1}</div>
+          <div class="scene-name" contenteditable="${scene._deleted ? 'false' : 'true'}" data-i="${i}"
+               onblur="editName(${i}, this.textContent)">${esc(scene.name)}</div>
+        </div>
+        <div class="field">
+          <span class="field-label">视觉图:</span>
+          <input class="viz-input ${invalid ? 'invalid' : ''}" value="${esc(scene.visualRef)}" placeholder="page_xxx.png"
+                 ${scene._deleted ? 'disabled' : ''}
+                 oninput="editViz(${i}, this.value, this)" />
+          <span class="viz-err ${invalid ? 'show' : ''}" data-err="${i}">命名不合法</span>
+        </div>
+      </div>
+      <div class="scene-actions">
+        ${scene._deleted
+          ? '<button onclick="restoreScene(' + i + ')" title="撤销删除">↩︎ 撤销</button>'
+          : '<button onclick="deleteScene(' + i + ')" title="删除场景">🗑️</button>'}
+      </div>
+      ${vizImg}
+    </div>`;
+  }).join('');
+  updateBadge();
+}
+
+function findOrig(uid) { return originalData.find((_, idx) => idx === uid); }
+
+function isModified(scene) {
+  if (scene._added || scene._deleted) return false;
+  const orig = scene._uid != null ? originalData[scene._uid] : null;
+  if (!orig) return false;
+  return scene.name !== orig.name || scene.visualRef !== orig.visualRef;
+}
+
+function editName(i, val) {
+  data[i].name = val.trim();
+  render();
+}
+
+function editViz(i, val, el) {
+  data[i].visualRef = val.trim();
+  const ok = vizValid(val.trim());
+  el.classList.toggle('invalid', !ok);
+  const err = document.querySelector('[data-err="' + i + '"]');
+  if (err) err.classList.toggle('show', !ok);
+  updateBadge();
+}
+
+function addScene() {
+  data.push({ name: '新场景', visualRef: '', visualExists: false, _uid: null, _added: true, _deleted: false, _origVisual: '' });
+  render();
+}
+
+function deleteScene(i) {
+  if (data[i]._added) {
+    data.splice(i, 1); // 新增的直接移除
+  } else {
+    data[i]._deleted = true;
+  }
+  render();
+}
+
+function restoreScene(i) {
+  data[i]._deleted = false;
+  render();
+}
+
+function updateBadge() {
+  const n = countChanges();
+  const badge = document.getElementById('changeBadge');
+  badge.style.display = n > 0 ? 'inline' : 'none';
+  badge.textContent = n;
+}
+
+function countChanges() {
+  let n = 0;
+  data.forEach(s => {
+    if (s._added) { n++; return; }
+    if (s._deleted) { n++; return; }
+    if (isModified(s)) n++;
+  });
+  return n;
+}
+
+function exportChanges() {
+  if (countChanges() === 0) { alert('无编辑'); return; }
+  let text = '# 需求-场景清单 编辑记录\n\n';
+  text += '> 以下为对场景清单的修改意见，可作为审核反馈回填重跑。\n\n';
+
+  const added = data.filter(s => s._added);
+  const deleted = data.filter(s => s._deleted);
+  const renamed = [];
+  const revized = [];
+  data.forEach(s => {
+    if (s._added || s._deleted) return;
+    const orig = originalData[s._uid];
+    if (!orig) return;
+    if (s.name !== orig.name) renamed.push({ from: orig.name, to: s.name });
+    if (s.visualRef !== orig.visualRef) revized.push({ name: s.name, from: orig.visualRef || '(空)', to: s.visualRef || '(空)' });
+  });
+
+  added.forEach(s => { text += '【新增场景】' + (s.name || '未命名') + '（视觉图: ' + (s.visualRef || '待定') + '）\n'; });
+  deleted.forEach(s => { text += '【删除场景】' + s.name + '\n'; });
+  renamed.forEach(r => { text += '【改名】' + r.from + ' → ' + r.to + '\n'; });
+  revized.forEach(r => { text += '【改视觉图】' + r.name + ': ' + r.from + ' → ' + r.to + '\n'; });
+
+  // 始终附上编辑后的完整列表，消除 LLM 重生时的歧义
+  text += '\n【编辑后完整场景列表（以此为准）】\n';
+  data.filter(s => !s._deleted).forEach((s, idx) => {
+    text += (idx + 1) + '. ' + (s.name || '未命名') + '  视觉图: ' + (s.visualRef || '待定') + '\n';
+  });
+
+  // 命名告警
+  const bad = data.filter(s => !s._deleted && !vizValid(s.visualRef) && s.visualRef);
+  if (bad.length) {
+    text += '\n⚠️ 以下视觉图文件名不符合 page_ + kebab-case + .png 规范，请修正：\n';
+    bad.forEach(s => { text += '- ' + s.name + ': ' + s.visualRef + '\n'; });
+  }
+
+  showModal('编辑记录（作为修改意见回填）', text);
+}
+
+function exportFullMd() {
+  let out = PREAMBLE ? PREAMBLE + '\n\n' : '# 需求-场景清单\n\n## 场景列表\n\n';
+  let n = 0;
+  data.forEach(s => {
+    if (s._deleted) return;
+    n++;
+    out += '### ' + n + '. ' + (s.name || '未命名') + '\n';
+    out += '- 视觉图: `' + (s.visualRef || 'page_todo.png') + '`\n\n';
+  });
+  showModal('完整 MD（可直接替换 需求-场景清单.md）', out.trimEnd() + '\n');
+}
+
+function showModal(title, content) {
+  document.getElementById('modalTitle').textContent = title;
+  document.getElementById('modalContent').textContent = content;
+  document.getElementById('modal').classList.add('show');
+}
+function closeModal() { document.getElementById('modal').classList.remove('show'); }
+function copyModal() {
+  navigator.clipboard.writeText(document.getElementById('modalContent').textContent).then(() => alert('已复制')).catch(() => alert('复制失败，请手动选择'));
+}
+function resetAll() {
+  if (!confirm('确定重置所有修改？')) return;
+  data = JSON.parse(JSON.stringify(originalData));
+  data.forEach((s, i) => { s._uid = i; s._added = false; s._deleted = false; });
+  render();
+}
+
+// 记录每条原始场景的 _origVisual（用于判断图是否仍是原始命中的那张）
+originalData.forEach(s => { s._origVisual = s.visualRef; });
+data.forEach(s => { if (s._uid != null && originalData[s._uid]) s._origVisual = originalData[s._uid].visualRef; });
+
+render();
+</script>
+</body>
+</html>

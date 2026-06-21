@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>元素实现清单 - READ_BACK 核对编辑器</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; padding: 20px; color: #333; font-size: 13px; }
+h1 { font-size: 22px; margin-bottom: 12px; }
+.toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+.btn { padding: 7px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; }
+.btn-primary { background: #1677ff; color: #fff; }
+.btn-primary:hover { background: #4096ff; }
+.btn-green { background: #52c41a; color: #fff; }
+.btn-green:hover { background: #73d13d; }
+.btn-danger { background: #ff4d4f; color: #fff; }
+.btn-danger:hover { background: #ff7875; }
+.btn-secondary { background: #fff; color: #333; border: 1px solid #ddd; }
+.btn-secondary:hover { background: #f9f9f9; }
+.badge { background: #ff4d4f; color: #fff; border-radius: 10px; padding: 2px 7px; font-size: 11px; margin-left: 6px; }
+.scene { margin-bottom: 24px; }
+.scene.has-visual { display: flex; gap: 20px; align-items: flex-start; }
+.scene-main { flex: 1; min-width: 0; }
+.scene-visual { width: 260px; flex-shrink: 0; position: sticky; top: 20px; align-self: flex-start; }
+.scene-visual img { width: 100%; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); border: 1px solid #e0e0e0; display: block; }
+.viz-placeholder { padding: 20px 12px; border: 2px dashed #ddd; border-radius: 8px; text-align: center; color: #999; font-size: 12px; }
+/* figma 框选浮层：覆盖在视觉图上，默认全透明不挡图；框默认隐藏，hover 元素行才显其一 */
+.viz-overlay { position: absolute; inset: 0; pointer-events: none; }
+.viz-box { position: absolute; border: 2px solid #ff4d4f; border-radius: 3px; box-sizing: border-box; display: none; }
+.viz-box.show { display: block; box-shadow: 0 0 0 9999px rgba(0,0,0,0.04); }
+/* 批量框选模式：默认隐藏；筛选图片元素或显示全部时才批量展示 */
+.viz-overlay.show-filtered .viz-box.filtered-visible { display: block; box-shadow: none; }
+.viz-overlay.show-filtered .viz-box.filtered-visible .viz-box-label { display: none; }
+/* 全显模式：所有框显出来、去聚光、隐标签（只看彩色框，便于扫覆盖盲区）；hover 的那个仍显标签 */
+.viz-overlay.show-all .viz-box { display: block; box-shadow: none; }
+.viz-overlay.show-all .viz-box-label { display: none; }
+.viz-overlay.show-all .viz-box.show .viz-box-label { display: block; }
+.viz-box-label { position: absolute; top: -16px; left: -2px; font-size: 10px; line-height: 14px; padding: 0 4px; border-radius: 3px 3px 3px 0; color: #fff; white-space: nowrap; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+.viz-note { position: absolute; left: 8px; top: 8px; background: #fa8c16; color: #fff; font-size: 11px; padding: 3px 7px; border-radius: 4px; display: none; max-width: 90%; }
+.viz-note.show { display: block; }
+tr.viz-hover td { background: #fff7e6 !important; }
+.box-hint { font-size: 12px; color: #8c8c8c; margin: -6px 0 14px; }
+.box-hint b { color: #595959; }
+.scene-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.scene-title { font-size: 15px; font-weight: 600; padding: 8px 12px; background: #fff; border-radius: 6px; border-left: 4px solid #1677ff; flex: 1; }
+.table-wrap { overflow-x: auto; background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { background: #fafafa; font-weight: 600; text-align: left; padding: 8px 10px; border-bottom: 2px solid #eee; position: sticky; top: 0; font-size: 12px; white-space: nowrap; }
+/* .table-wrap（overflow-x:auto）成为 sticky 包含块且无纵向滚动，叠加顶栏注入的 th { top: var(--pl-topbar-h) }
+   大偏移会把表头钉到表格底部（显示成最后一行）。wrap 内禁用 sticky，表头随表正常置顶。 */
+.table-wrap th { position: static; }
+td { padding: 6px 10px; border-bottom: 1px solid #f0f0f0; max-width: 300px; word-break: break-word; white-space: normal; }
+tr:hover td { background: #f8f9ff; }
+tr.modified td { background: #fffbe6; }
+tr.added td { background: #f6ffed; }
+tr.deleted td { background: #fff1f0; text-decoration: line-through; opacity: 0.6; }
+td.tag-col-has { background: #e6f7e6; }
+td.tag-col-has textarea { color: #389e0d; font-weight: 500; }
+td.tag-col-none textarea { color: #bbb; text-align: center; }
+td textarea { border: 1px solid transparent; background: transparent; font-size: 13px; padding: 2px 4px; border-radius: 3px; width: 100%; min-width: 50px; resize: none; overflow: hidden; font-family: inherit; line-height: 1.4; }
+td textarea:hover { border-color: #d9d9d9; }
+td textarea:focus { border-color: #1677ff; outline: none; background: #fff; }
+td.enum-col { white-space: nowrap; }
+td.enum-col select { border: 1px solid #d9d9d9; background: #fff; font-size: 13px; padding: 3px 6px; border-radius: 4px; font-family: inherit; cursor: pointer; max-width: 160px; }
+td.enum-col select:hover { border-color: #1677ff; }
+td.enum-col select:focus { border-color: #1677ff; outline: none; }
+td.reuse-col { min-width: 210px; }
+.reuse-editor { display: flex; gap: 4px; align-items: center; }
+.reuse-editor select, .reuse-editor input { border: 1px solid #d9d9d9; background: #fff; font-size: 13px; padding: 3px 6px; border-radius: 4px; font-family: inherit; min-width: 0; }
+.reuse-editor select { width: 86px; flex-shrink: 0; cursor: pointer; }
+.reuse-editor input { width: 118px; }
+.reuse-editor input:disabled { background: #f5f5f5; color: #bfbfbf; }
+.field-hint { margin: -8px 0 14px; padding: 8px 10px; border: 1px solid #e6f4ff; background: #f0f7ff; border-radius: 6px; color: #4b5b73; font-size: 12px; }
+.row-actions { white-space: nowrap; }
+.row-actions button { background: none; border: none; cursor: pointer; font-size: 14px; padding: 2px 4px; border-radius: 3px; }
+.row-actions button:hover { background: #f0f0f0; }
+.modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; }
+.modal-overlay.show { display: flex; }
+.modal { background: #fff; border-radius: 12px; padding: 24px; max-width: 800px; width: 90%; max-height: 80vh; overflow-y: auto; }
+.modal h2 { font-size: 18px; margin-bottom: 16px; }
+.modal pre { background: #f5f5f5; padding: 16px; border-radius: 8px; font-size: 12px; white-space: pre-wrap; word-break: break-all; max-height: 50vh; overflow-y: auto; }
+.modal .actions { margin-top: 16px; display: flex; gap: 8px; justify-content: flex-end; }
+.filters { margin-bottom: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
+.filter-btn { padding: 5px 10px; border: 1px solid #ddd; border-radius: 4px; background: #fff; cursor: pointer; font-size: 12px; }
+.filter-btn.active { background: #1677ff; color: #fff; border-color: #1677ff; }
+.filter-btn.filter-attn { color: #d46b08; border-color: #ffd591; background: #fff7e6; }
+.filter-btn.filter-attn.active { background: #fa8c16; color: #fff; border-color: #fa8c16; }
+/* node 点选指认模式 */
+.viz-overlay.pin-mode { pointer-events: auto; cursor: crosshair; background: rgba(22,119,255,.06); }
+.pin-bar { position: sticky; top: 0; z-index: 50; background:#1677ff; color:#fff; padding:8px 12px; border-radius:6px; margin-bottom:10px; display:none; align-items:center; gap:8px; flex-wrap:wrap; font-size:13px; }
+.pin-bar.show { display:flex; }
+.pin-bar button { padding:4px 10px; border:none; border-radius:4px; cursor:pointer; font-size:12px; background:#fff; color:#333; }
+.pin-bar select { padding:3px 6px; border-radius:4px; border:none; font-size:12px; }
+.viz-box.manual { border-style: solid; box-shadow: 0 0 0 1px #fff inset; }
+tr.figma-edited td { background:#e6f4ff !important; }
+.hidden { display: none !important; }
+.hide-visual-values .visual-value-col { display: none !important; }
+</style>
+<style>
+  :root { --pl-topbar-h: 0px; }
+  .pl-topbar { position: sticky; top: 0; z-index: 900;
+    font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    box-shadow: 0 2px 8px rgba(0,0,0,.18); }
+  .pl-topbar .pl-bar { display: flex; align-items: center; gap: 12px; padding: 8px 16px;
+    background: #1f2937; color: #e5e7eb; }
+  .pl-topbar.has-todos .pl-bar { background: #78350f; box-shadow: inset 4px 0 0 #f59e0b; }
+  .pl-topbar .pl-dots { display: flex; gap: 5px; flex-shrink: 0; }
+  .pl-topbar .pl-dot { width: 10px; height: 10px; border-radius: 50%; background: #4b5563; }
+  .pl-topbar .pl-dot.done { background: #10b981; }
+  .pl-topbar .pl-dot.current { background: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,.35); }
+  .pl-topbar .pl-dot.blocked { background: #f59e0b; box-shadow: 0 0 0 2px rgba(245,158,11,.35); }
+  .pl-topbar .pl-label { font-weight: 600; color: #fff; white-space: nowrap; }
+  .pl-topbar .pl-todo-hint { color: #fcd34d; white-space: nowrap; font-weight: 600; }
+  .pl-topbar .pl-spacer { flex: 1; }
+  .pl-topbar a.pl-home { color: #93c5fd; text-decoration: none; white-space: nowrap; font-weight: 600; }
+  .pl-topbar.has-todos a.pl-home { color: #fde68a; }
+  .pl-topbar a.pl-home:hover { text-decoration: underline; }
+  /* 收起/展开按钮：默认展开，点击收起待办面板腾出阅读区 */
+  .pl-topbar .pl-toggle { flex-shrink: 0; cursor: pointer; font: inherit; font-weight: 600; color: inherit;
+    background: transparent; border: 1px solid rgba(255,255,255,.35); border-radius: 6px;
+    padding: 2px 10px; white-space: nowrap; }
+  .pl-topbar .pl-toggle:hover { background: rgba(255,255,255,.14); }
+  .pl-topbar.collapsed .pl-todos { display: none; }
+  /* 本产物待办面板：固定展开。红色=本产物规则/重要提示，橙色=待办 */
+  .pl-todos { background: #fffaf3; border-bottom: 2px solid #fa8c16;
+    padding: 12px 18px; max-height: 48vh; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 10px;
+    font-size: 13.5px; line-height: 1.7; }
+  /* 红色：规则 / 重要提示 */
+  .pl-note { display: flex; gap: 12px; align-items: flex-start;
+    background: #fff1f0; border: 1px solid #ffccc7; border-left: 5px solid #f5222d; border-radius: 10px;
+    padding: 12px 16px; color: #5c0011; box-shadow: 0 1px 4px rgba(245,34,45,0.12); }
+  .pl-note .pl-note-icon { flex-shrink: 0; font-size: 20px; line-height: 1.4; }
+  .pl-note .pl-note-body { flex: 1; }
+  .pl-note .pl-note-line { font-weight: 600; }
+  .pl-note .pl-note-line + .pl-note-line { margin-top: 4px; }
+  .pl-note b { color: #cf1322; }
+  /* 橙色：待办 */
+  .pl-todobox { display: flex; gap: 12px; align-items: flex-start;
+    background: #fff7e6; border: 1px solid #ffd591; border-left: 5px solid #fa8c16; border-radius: 10px;
+    padding: 12px 16px; color: #613400; box-shadow: 0 1px 4px rgba(250,140,22,0.12); }
+  .pl-todobox .pl-todobox-icon { flex-shrink: 0; font-size: 20px; line-height: 1.4; }
+  .pl-todobox .pl-todobox-body { flex: 1; }
+  .pl-todobox .pl-todobox-title { font-weight: 700; color: #d46b08; font-size: 14px; margin-bottom: 7px; }
+  .pl-todos .pl-gate { font-weight: 700; color: #d46b08; margin: 9px 0 5px; font-size: 13px; }
+  .pl-todos ul { margin: 0; padding: 0; list-style: none; }
+  .pl-todos li { display: flex; align-items: flex-start; gap: 9px; padding: 5px 0; }
+  .pl-todos li + li { border-top: 1px dashed #ffd591; }
+  /* 序号圆点 */
+  .pl-todos .pl-step-n { display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; border-radius: 50%; background: #fa8c16; color: #fff;
+    font-size: 11px; font-weight: 700; flex-shrink: 0; margin-top: 2px; }
+  .pl-todos .pl-todo-text { flex: 1; }
+  .pl-todos a.pl-todo-go { display: inline-block; margin-left: 8px; vertical-align: baseline;
+    color: #ad4e00; text-decoration: none; white-space: nowrap; font-weight: 600;
+    border: 1px solid #ffd666; border-radius: 5px; padding: 0 9px; background: #fff1b8; }
+  .pl-todos a.pl-todo-go:hover { background: #ffe58f; border-color: #fa8c16; }
+  .pl-todos .pl-todo-none { color: #237804; font-weight: 600; }
+  @media (prefers-color-scheme: dark) {
+    .pl-todos { background: #2a2118; border-bottom-color: #b45309; }
+  }
+  .pl-anchor-hl { background: #fffbeb; outline: 2px solid #fde68a; outline-offset: 2px;
+    border-radius: 4px; scroll-margin-top: calc(var(--pl-topbar-h) + 12px); }
+  /* 让页面内其他 sticky/fixed 元素让位给顶栏，互不遮挡 */
+  html { scroll-padding-top: calc(var(--pl-topbar-h) + 12px) !important; }
+  .toc { top: var(--pl-topbar-h) !important; height: calc(100vh - var(--pl-topbar-h)) !important; }
+  .edit-toolbar { top: var(--pl-topbar-h) !important; }
+  thead, thead th, table th { top: var(--pl-topbar-h) !important; }
+  .page-with-visual .page-visual, .page-visual, .scene-visual { top: calc(var(--pl-topbar-h) + 16px) !important; }
+</style>
+</head>
+<body>
+<div id="pl-topbar" class="pl-topbar" data-step="6">
+  <div class="pl-bar">
+    <div class="pl-dots"></div><span class="pl-label"></span><span class="pl-todo-hint"></span>
+    <span class="pl-spacer"></span>
+    <a class="pl-home" href="./流水线总览.html">📋 流水线总览 →</a>
+    <button type="button" class="pl-toggle" id="pl-toggle" aria-expanded="true">收起 ▲</button>
+  </div>
+  <div class="pl-todos" id="pl-todos"></div>
+</div>
+<script src="./idea-pipeline-data.js"></script>
+<script>
+(function () {
+  var bar = document.getElementById("pl-topbar");
+  if (!bar) return;
+  function normalizeIdeaStatus(D) {
+    if (!D || !D.steps) return null;
+    var gates = [];
+    var all = D.allStepTodos || {};
+    Object.keys(all).forEach(function (stepId) {
+      (all[stepId] || []).forEach(function (g) {
+        var files = g.artifactFiles || [];
+        var todos = [];
+        (g.todos || []).forEach(function (text) {
+          if (files.length) files.forEach(function (file) { todos.push({ text: text, link: file }); });
+          else todos.push({ text: text, link: "" });
+        });
+        gates.push({ gateName: g.title || g.gate || ("第 " + stepId + " 步"), note: g.note, todos: todos });
+      });
+    });
+    return { current: D.current, steps: D.steps, gates: gates, artifacts: D.artifacts || [] };
+  }
+  var S = window.PIPELINE_STATUS || normalizeIdeaStatus(window.IDEA_PIPELINE_DATA);
+  var dots = bar.querySelector(".pl-dots");
+  var label = bar.querySelector(".pl-label");
+  var hint = bar.querySelector(".pl-todo-hint");
+  var panel = document.getElementById("pl-todos");
+  var toggle = document.getElementById("pl-toggle");
+  var fallback = Number(bar.getAttribute("data-step")) || 1;
+  var currentFile = "";
+  try { currentFile = decodeURIComponent((location.pathname || "").split("/").pop() || ""); }
+  catch (e) { currentFile = (location.pathname || "").split("/").pop() || ""; }
+  function baseName(p) { return String(p || "").split("/").pop(); }
+  // link 形如 "需求-最终PRD.html#reviewPanel" → { file, hash }
+  function parseLink(link) {
+    var s = String(link || ""); var i = s.indexOf("#");
+    return i >= 0 ? { file: s.slice(0, i), hash: s.slice(i + 1) } : { file: s, hash: "" };
+  }
+
+  // 顶栏实测高度写入 --pl-topbar-h，供页面内其他 sticky 元素让位（折叠/展开、resize 后重算）
+  function syncHeight() {
+    document.documentElement.style.setProperty("--pl-topbar-h", bar.offsetHeight + "px");
+  }
+
+  // 收起/展开：默认展开，状态按当前文件名持久化到 localStorage（刷新后保留）
+  var collapseKey;
+  try { collapseKey = "pl-collapse::" + ((location.pathname || "").split("/").pop() || "default"); }
+  catch (e) { collapseKey = "pl-collapse::default"; }
+  function applyCollapsed(collapsed) {
+    bar.classList.toggle("collapsed", collapsed);
+    if (toggle) {
+      toggle.textContent = collapsed ? "展开TODO ▼" : "收起TODO ▲";
+      toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    }
+    syncHeight();
+  }
+  if (toggle) {
+    toggle.addEventListener("click", function () {
+      var next = !bar.classList.contains("collapsed");
+      try { localStorage.setItem(collapseKey, next ? "1" : "0"); } catch (e) {}
+      applyCollapsed(next);
+    });
+  }
+  var savedCollapse = null;
+  try { savedCollapse = localStorage.getItem(collapseKey); } catch (e) {}
+
+  if (!S || !S.steps) {
+    label.textContent = "第 " + fallback + " 步";
+    panel.style.display = "none";
+    if (toggle) toggle.style.display = "none";  // 无待办面板可折叠，隐藏按钮
+    syncHeight();
+    return;
+  }
+  applyCollapsed(savedCollapse === "1");  // 默认展开
+  S.steps.forEach(function (st) {
+    var d = document.createElement("span");
+    d.className = "pl-dot " + st.status;
+    d.title = st.id + " " + st.name;
+    dots.appendChild(d);
+  });
+  var cur = S.steps.filter(function (s) { return s.id === S.current; })[0];
+  if (cur) label.textContent = S.current + "/" + S.steps.length + " " + cur.name;
+  // 本产物自身所属 step：idea2game 可从 artifacts 反查；无匹配时使用 data-step 降级。
+  var artifactStepId = fallback;
+  if (S.artifacts && currentFile) {
+    var art = S.artifacts.filter(function (a) { return baseName(a.file) === currentFile; })[0];
+    if (art && art.stepId) artifactStepId = art.stepId;
+  }
+  var artStep = S.steps.filter(function (s) { return s.id === artifactStepId; })[0];
+  var artStatus = artStep ? artStep.status : "";
+  var artName = artStep ? artStep.name : ("第 " + artifactStepId + " 步");
+  var curName = cur ? cur.name : "";
+
+  // 只展示「本产物」的待办：按 todo.link 文件名与当前页面文件名匹配过滤
+  // （同一步可能跨多个产物，如元素清单校验步含 PRD 回补 + 元素清单编辑两门，各产物只看自己那部分）
+  var gates = (S.gates || []).map(function (g) {
+    var todos = (g.todos || []).filter(function (t) {
+      var f = parseLink(t.link).file;
+      return !!f && (!currentFile || baseName(f) === currentFile);
+    });
+    return { gateName: g.gateName, note: g.note, todos: todos };
+  }).filter(function (g) { return g.todos.length; });
+  var total = gates.reduce(function (n, g) { return n + g.todos.length; }, 0);
+  if (hint) {
+    hint.textContent = total > 0 ? "· 本产物 " + total + " 项待确认"
+      : artStatus === "done" ? "· 本阶段已完成"
+      : artStatus === "current" ? "· 本产物无待办"
+      : "· 本阶段未开始";
+  }
+
+  var multiGate = gates.length > 1;
+  if (total > 0) {
+    bar.classList.add("has-todos");
+    var htmlStr = "";
+
+    // 红色：本产物规则 / 重要提示（note 可为字符串或数组）
+    var notes = [];
+    gates.forEach(function (g) {
+      if (!g.note) return;
+      (Array.isArray(g.note) ? g.note : [g.note]).forEach(function (n) { if (n) notes.push(n); });
+    });
+    if (notes.length) {
+      htmlStr += '<div class="pl-note"><span class="pl-note-icon">⚠️</span><div class="pl-note-body">'
+        + notes.map(function (n) { return '<div class="pl-note-line">' + esc(n) + "</div>"; }).join("")
+        + "</div></div>";
+    }
+
+    // 橙色：待办列表（每条带序号圆点）
+    htmlStr += '<div class="pl-todobox"><span class="pl-todobox-icon">📝</span><div class="pl-todobox-body">';
+    htmlStr += '<div class="pl-todobox-title">TODO（' + total + "）</div>";
+    var seq = 0;
+    gates.forEach(function (g) {
+      if (multiGate && g.gateName) htmlStr += '<div class="pl-gate">' + esc(g.gateName) + "</div>";
+      htmlStr += "<ul>";
+      g.todos.forEach(function (t) {
+        seq += 1;
+        var pl = parseLink(t.link);
+        var sameFile = pl.file && baseName(pl.file) === currentFile;
+        var go = "";
+        if (t.action && /^[A-Za-z_$][\w$]*$/.test(t.action)) {
+          // 本产物内的 JS 动作（如导出变更记录）→ 「前往」直接调用页面内函数（拉起弹窗）
+          go = '<a class="pl-todo-go" href="#" data-action="' + esc(t.action) + '">前往 →</a>';
+        } else if (sameFile && pl.hash) {
+          // 本产物内有锚点 → 「前往」滚动到对应模块（hashchange 触发高亮 + scroll-padding 让位顶栏）
+          go = '<a class="pl-todo-go" href="#' + esc(pl.hash) + '">前往 →</a>';
+        } else if (pl.file && !sameFile) {
+          // 指向别的产物 → 「去处理」跨页跳转（带锚点，目标页自动高亮）
+          go = '<a class="pl-todo-go" href="' + esc(t.link) + '">去处理 →</a>';
+        }
+        htmlStr += '<li><span class="pl-step-n">' + seq + '</span><span class="pl-todo-text">' + esc(t.text || "") + go + "</span></li>";
+      });
+      htmlStr += "</ul>";
+    });
+    htmlStr += "</div></div>";
+
+    panel.innerHTML = htmlStr;
+
+    // 「前往」绑定页面内动作（data-action）→ 调用同文档全局函数（如 exportEdits 拉起变更记录弹窗）
+    panel.addEventListener("click", function (e) {
+      var a = e.target && e.target.closest && e.target.closest(".pl-todo-go[data-action]");
+      if (!a) return;
+      e.preventDefault();
+      var fn = a.getAttribute("data-action");
+      if (typeof window[fn] === "function") window[fn]();
+    });
+  } else {
+    var noneIcon, noneMsg;
+    if (artStatus === "done") {
+      noneIcon = "✅";
+      noneMsg = "✓ 本阶段「" + artName + "」已完成。流水线当前进行到 " + S.current + "/" + S.steps.length + " " + curName + "，其余待办见流水线总览。";
+    } else if (artStatus === "current") {
+      noneIcon = "✅";
+      noneMsg = "✓ 本产物无需手动确认（其他产物待办见流水线总览）";
+    } else {
+      noneIcon = "ℹ️";
+      noneMsg = "本阶段「" + artName + "」尚未开始（流水线当前在第 " + S.current + " 步）。";
+    }
+    panel.innerHTML = '<div class="pl-todobox"><span class="pl-todobox-icon">' + noneIcon + '</span><div class="pl-todobox-body">'
+      + '<span class="pl-todo-none">' + esc(noneMsg) + '</span></div></div>';
+  }
+  syncHeight();
+  window.addEventListener("resize", syncHeight);
+  window.addEventListener("load", syncHeight);
+
+  function esc(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  // 锚点高亮：URL 带 #xxx 时给目标元素加高亮类（先清掉上一个，避免多次跳转累积）
+  function hl() {
+    var id = decodeURIComponent((location.hash || "").slice(1));
+    if (!id) return;
+    var el = document.getElementById(id);
+    if (!el) return;
+    Array.prototype.forEach.call(document.querySelectorAll(".pl-anchor-hl"), function (p) {
+      if (p !== el) p.classList.remove("pl-anchor-hl");
+    });
+    el.classList.add("pl-anchor-hl");
+  }
+  hl();
+  window.addEventListener("hashchange", hl);
+})();
+</script>
+<h1>元素实现清单 READ_BACK 核对编辑器</h1>
+<div class="toolbar">
+  <button class="btn btn-primary" onclick="exportChanges()">📋 导出变更记录<span class="badge" id="changeBadge" style="display:none">0</span></button>
+  <button class="btn btn-secondary" onclick="exportFullMd()">📄 导出完整MD</button>
+  <button class="btn btn-secondary" onclick="resetAll()">↩️ 重置全部</button>
+</div>
+<div class="filters">
+  <button class="filter-btn active" data-filter="all">全部</button>
+  <button class="filter-btn" data-filter="img">图片元素</button>
+  <button class="filter-btn" data-filter="img-boxes">图片元素 + 框选</button>
+  <button class="filter-btn" data-filter="merge">合入背景</button>
+  <button class="filter-btn" data-filter="css">CSS元素</button>
+  <button class="filter-btn" data-filter="modified">已修改</button>
+  <button class="filter-btn filter-attn" data-filter="uncertain-vm">⚠ 待处理 warnings/VM</button>
+  <button class="btn btn-secondary" id="toggleVisualValuesBtn" onclick="toggleVisualValues()">👁️ 显示视觉数值列</button>
+</div>
+<div class="field-hint">字段说明：背景透明「是」= 透明底素材，「否」= 不透明整图直出；出图方式 = 独立素材（单独切图）/ 并入背景（烤进背景、代码不渲染）/ 无字底板（素材无字、文字代码叠）/ 带字整图（文字烤进素材）。</div>
+<div class="box-hint">💡 默认不铺满标注；<b>hover 元素行</b>才高亮单个 READ_BACK bbox。需要批量核对时使用「图片元素 + 框选」筛选或「显示全部框」。已定位 109 / 未定位 0 个。&nbsp; <button class="btn btn-secondary" id="toggleBoxesBtn" onclick="toggleAllBoxes()" style="padding:3px 10px;font-size:12px">🔲 显示全部框（找遗漏）</button></div>
+<div class="pin-bar" id="pinBar">
+  <span id="pinTitle"></span>
+  <select onchange="pinMethod(this.value)"><option value="">还原方式…</option><option>切图</option><option>CSS文本</option><option>数据层</option><option>CSS形状</option><option>SVG</option></select>
+  <button onclick="pinUnmount()">✗ 图中无此元素</button>
+  <button onclick="pinLock()">🔒 锁定当前</button>
+  <button onclick="endPin()">取消</button>
+</div>
+<div id="app"></div>
+
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <h2 id="modalTitle">导出</h2>
+    <pre id="modalContent"></pre>
+    <div class="actions">
+      <button class="btn btn-primary" onclick="copyModal()">📋 复制</button>
+      <button class="btn btn-secondary" onclick="closeModal()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script id="element-data" type="application/json">[{"name":"MineHomePage / mine_home（矿区主页入口）元素","level":2,"sceneId":"mine_home","headers":["元素ID","元素名称","类型","层级(z)","父元素","预期数量","实现方式","建议文件名","背景透明","目标比例","交互行为","复用标注","出图方式","视觉数值"],"rows":[["H01","主页背景","bg","0","root","1","图片","bg_mine_home","opaque","9:16","static","—","独立素材","`{\"bbox\":[0,0,750,1334],\"observed_ratio\":0.5622,\"shape_mismatch\":\"ok\"}`"],["H02","顶部HUD容器","bar","10","root","1","CSS","—","—","—","static","—","—","`{\"bbox\":[4,11,741,67],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\"}`"],["H03","返回按钮图标","icon","10","H02","1","图片","icon_back","transparent","—","click","—","独立素材","`{\"bbox\":[11,16,69,60]}`"],["H04","体力图标","icon","10","H02","1","图片","icon_energy","transparent","—","static","—","独立素材","`{\"bbox\":[116,24,29,31]}`"],["H05","体力数值","text","10","H02","1","CSS","—","—","—","static","—","—","`{\"bbox\":[149,25,74,29],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":14,\"font_weight\":700,\"color\":\"#F8E6B8\",\"align\":\"center\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}}`"],["H06","金币图标","icon","10","H02","1","图片","icon_coin","transparent","—","static","—","独立素材","`{\"bbox\":[249,20,38,38]}`"],["H07","金币数值","text","10","H02","1","CSS","—","—","—","static","—","—","`{\"bbox\":[303,25,54,29],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":14,\"font_weight\":700,\"color\":\"#F8E6B8\",\"align\":\"center\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}}`"],["H08","玉币图标","icon","10","H02","1","图片","icon_premium","transparent","—","static","—","独立素材","`{\"bbox\":[420,20,36,38]}`"],["H09","玉币数值","text","10","H02","1","CSS","—","—","—","static","—","—","`{\"bbox\":[474,25,38,29],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":14,\"font_weight\":700,\"color\":\"#F8E6B8\",\"align\":\"center\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}}`"],["H10","设置按钮图标","icon","10","H02","1","图片","icon_setting","transparent","—","click","—","独立素材","`{\"bbox\":[672,16,62,60]}`"],["H11","无尽矿井入口卡","area","10","root","1","图片","card_endless_entry","transparent","—","click","—","无字底板","`{\"bbox\":[162,543,430,390],\"text\":{\"font_size\":44,\"font_weight\":800,\"color\":\"#F4D7A4\",\"align\":\"center\",\"text_shadow\":\"0 3px 4px rgba(0,0,0,0.8)\"}}`"],["H12","入口标题文本","text","10","H11","1","CSS","—","—","—","static","—","—","`{\"bbox\":[247,594,258,67],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":44,\"font_weight\":800,\"color\":\"#F4D7A4\",\"align\":\"center\",\"text_shadow\":\"0 3px 4px rgba(0,0,0,0.8)\"}}`"],["H13","入场消耗提示文本","text","10","H11","1","CSS","—","—","—","static","—","—","`{\"bbox\":[247,679,258,91],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":20,\"font_weight\":600,\"color\":\"#F2D3A0\",\"align\":\"center\",\"line_height\":1.7,\"text_shadow\":\"0 2px 3px rgba(0,0,0,0.8)\"}}`"],["H14","进入无尽矿井按钮","btn","10","H11","1","图片","btn_enter_mine","transparent","—","click","—","无字底板","`{\"bbox\":[225,808,307,100],\"text\":{\"font_size\":32,\"font_weight\":800,\"color\":\"#FFF1C2\",\"align\":\"center\",\"text_stroke\":\"1px #5A2E13\",\"text_shadow\":\"0 2px 3px rgba(0,0,0,0.7)\"}}`"],["H15","入口禁用遮罩","area","10","H11","1","CSS","—","—","—","static","—","—","`{\"bbox\":[162,543,430,390],\"bg\":{\"type\":\"rgba\",\"value\":\"rgba(0,0,0,0)\",\"blur\":0},\"fill\":\"#000000\",\"radius\":24,\"border\":\"none\",\"shadow\":\"none\"}`"],["H16","底部导航底板","bar","10","root","1","图片","bar_bottom_dock","transparent","—","static","—","带字整图","`{\"bbox\":[167,1153,394,149]}`"],["H17","背包图标","icon","10","H16","1","图片","icon_backpack","transparent","—","click","—","独立素材","`{\"bbox\":[447,1186,76,65]}`"]],"visualRef":"../assets/refs/design-sheets/page_mine_home.webp","visualExists":true,"imageSize":null,"boxes":{"H01":{"l":0,"t":0,"w":100,"h":100,"method":"图片","nodeName":"bg","source":"readback","isImage":true},"H02":{"l":0.53,"t":0.82,"w":98.8,"h":5.02,"method":"CSS","nodeName":"bar","source":"readback","isImage":false},"H03":{"l":1.47,"t":1.2,"w":9.2,"h":4.5,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"H04":{"l":15.47,"t":1.8,"w":3.87,"h":2.32,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"H05":{"l":19.87,"t":1.87,"w":9.87,"h":2.17,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"H06":{"l":33.2,"t":1.5,"w":5.07,"h":2.85,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"H07":{"l":40.4,"t":1.87,"w":7.2,"h":2.17,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"H08":{"l":56,"t":1.5,"w":4.8,"h":2.85,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"H09":{"l":63.2,"t":1.87,"w":5.07,"h":2.17,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"H10":{"l":89.6,"t":1.2,"w":8.27,"h":4.5,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"H11":{"l":21.6,"t":40.7,"w":57.33,"h":29.24,"method":"图片","nodeName":"area","source":"readback","isImage":true},"H12":{"l":32.93,"t":44.53,"w":34.4,"h":5.02,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"H13":{"l":32.93,"t":50.9,"w":34.4,"h":6.82,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"H14":{"l":30,"t":60.57,"w":40.93,"h":7.5,"method":"图片","nodeName":"btn","source":"readback","isImage":true},"H15":{"l":21.6,"t":40.7,"w":57.33,"h":29.24,"method":"CSS","nodeName":"area","source":"readback","isImage":false},"H16":{"l":22.27,"t":86.43,"w":52.53,"h":11.17,"method":"图片","nodeName":"bar","source":"readback","isImage":true},"H17":{"l":59.6,"t":88.91,"w":10.13,"h":4.87,"method":"图片","nodeName":"icon","source":"readback","isImage":true}}},{"name":"EndlessMinePage / endless_mine（无尽矿井玩法页）元素","level":2,"sceneId":"endless_mine","headers":["元素ID","元素名称","类型","层级(z)","父元素","预期数量","实现方式","建议文件名","背景透明","目标比例","交互行为","复用标注","出图方式","视觉数值"],"rows":[["M01a","矿井背景-地表矿区","bg","0","root","1","图片","bg_mine_surface","opaque","9:16","static","—","独立素材","`{\"bbox\":[0,0,750,1334],\"observed_ratio\":0.5622,\"shape_mismatch\":\"ok\"}`"],["M01b","矿井背景-深地表","bg","0","root","1","图片","bg_mine_deep_surface","opaque","9:16","static","变体组：M01","独立素材","`{\"bbox\":[0,0,750,1334],\"observed_ratio\":0.5622,\"shape_mismatch\":\"ok\",\"visible\":false}`"],["M01c","矿井背景-浅海","bg","0","root","1","图片","bg_mine_shallow_sea","opaque","9:16","static","变体组：M01","独立素材","`{\"bbox\":[0,0,750,1334],\"observed_ratio\":0.5622,\"shape_mismatch\":\"ok\",\"visible\":false}`"],["M01d","矿井背景-深海","bg","0","root","1","图片","bg_mine_deep_sea","opaque","9:16","static","变体组：M01","独立素材","`{\"bbox\":[0,0,750,1334],\"observed_ratio\":0.5622,\"shape_mismatch\":\"ok\",\"visible\":false}`"],["M01e","矿井背景-地心火山泥","bg","0","root","1","图片","bg_mine_core_volcanic_mud","opaque","9:16","static","变体组：M01","独立素材","`{\"bbox\":[0,0,750,1334],\"observed_ratio\":0.5622,\"shape_mismatch\":\"ok\",\"visible\":false}`"],["M02","顶部HUD容器","bar","10","root","1","CSS","—","—","—","static","—","—","`{\"bbox\":[7,11,739,67],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\"}`"],["M03","返回按钮图标","icon","10","M02","1","图片","icon_back","transparent","—","click","共享：icon_back","独立素材","`{\"bbox\":[11,16,69,60]}`"],["M04","体力图标","icon","10","M02","1","图片","icon_energy","transparent","—","static","共享：icon_energy","独立素材","`{\"bbox\":[116,24,29,31]}`"],["M05","体力数值","text","10","M02","1","CSS","—","—","—","static","—","—","`{\"bbox\":[149,25,54,29],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":14,\"font_weight\":700,\"color\":\"#F8E6B8\",\"align\":\"center\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}}`"],["M06","金币图标","icon","10","M02","1","图片","icon_coin","transparent","—","static","共享：icon_coin","独立素材","`{\"bbox\":[249,20,38,38]}`"],["M07","金币数值","text","10","M02","1","CSS","—","—","—","static","—","—","`{\"bbox\":[303,25,54,29],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":14,\"font_weight\":700,\"color\":\"#F8E6B8\",\"align\":\"center\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}}`"],["M08","玉币图标","icon","10","M02","1","图片","icon_premium","transparent","—","static","共享：icon_premium","独立素材","`{\"bbox\":[420,20,36,38]}`"],["M09","玉币数值","text","10","M02","1","CSS","—","—","—","static","—","—","`{\"bbox\":[474,25,38,29],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":14,\"font_weight\":700,\"color\":\"#F8E6B8\",\"align\":\"center\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}}`"],["M10","设置按钮图标","icon","10","M02","1","图片","icon_setting","transparent","—","click","共享：icon_setting","独立素材","`{\"bbox\":[672,16,62,60]}`"],["M11","状态信息区底板","area","10","root","1","图片","panel_status_info","transparent","—","static","—","无字底板","`{\"bbox\":[45,87,657,60],\"text\":{\"font_size\":16,\"font_weight\":700,\"color\":\"#F3D7A2\",\"align\":\"center\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}}`"],["M12","当前深度类型文本","text","10","M11","1","CSS","—","—","—","static","—","—","`{\"bbox\":[77,105,94,22],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":14,\"font_weight\":700,\"color\":\"#F0D49C\",\"align\":\"center\"}}`"],["M13","本局推进文本","text","10","M11","1","CSS","—","—","—","static","—","—","`{\"bbox\":[272,105,188,22],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":14,\"font_weight\":700,\"color\":\"#F0D49C\",\"align\":\"center\"}}`"],["M14","本局状态文本","text","10","M11","1","CSS","—","—","—","static","—","—","`{\"bbox\":[536,105,112,22],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":14,\"font_weight\":700,\"color\":\"#57D64B\",\"align\":\"center\"}}`"],["M15","本局收获累计区底板","area","10","root","1","图片","panel_run_harvest","transparent","—","static","—","无字底板","`{\"bbox\":[16,160,717,114],\"text\":{\"font_size\":14,\"font_weight\":700,\"color\":\"#F4D6A3\",\"align\":\"center\"}}`"],["M16","本局金币槽","area","10","M15","1","CSS","—","—","—","animation","—","—","`{\"bbox\":[31,183,190,65],\"bg\":{\"type\":\"rgba\",\"value\":\"rgba(38,24,17,0.55)\",\"blur\":0},\"fill\":\"#261811\",\"radius\":8,\"border\":\"1px solid #8B5A2B\",\"shadow\":\"inset 0 1px 2px rgba(0,0,0,0.5)\"}`"],["M17","金币图标","icon","10","M16","1","图片","icon_coin","transparent","—","static","共享：icon_coin","独立素材","`{\"bbox\":[60,196,45,45]}`"],["M18","本局金币数值","text","10","M16","1","CSS","—","—","—","animation","—","—","`{\"bbox\":[111,204,91,31],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":22,\"font_weight\":700,\"color\":\"#F8E6B8\",\"align\":\"left\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}}`"],["M19","本局矿石槽","area","10","M15","1","CSS","—","—","—","animation","—","—","`{\"bbox\":[282,183,181,65],\"bg\":{\"type\":\"rgba\",\"value\":\"rgba(38,24,17,0.55)\",\"blur\":0},\"fill\":\"#261811\",\"radius\":8,\"border\":\"1px solid #8B5A2B\",\"shadow\":\"inset 0 1px 2px rgba(0,0,0,0.5)\"}`"],["M20","矿石图标","icon","10","M19","1","图片","icon_ore","transparent","—","static","—","独立素材","`{\"bbox\":[331,196,42,42]}`"],["M21","本局矿石数值","text","10","M19","1","CSS","—","—","—","animation","—","—","`{\"bbox\":[389,204,58,31],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":22,\"font_weight\":700,\"color\":\"#F8E6B8\",\"align\":\"left\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}}`"],["M22","本局材料槽","area","10","M15","1","CSS","—","—","—","animation","—","—","`{\"bbox\":[505,183,190,65],\"bg\":{\"type\":\"rgba\",\"value\":\"rgba(38,24,17,0.55)\",\"blur\":0},\"fill\":\"#261811\",\"radius\":8,\"border\":\"1px solid #8B5A2B\",\"shadow\":\"inset 0 1px 2px rgba(0,0,0,0.5)\"}`"],["M23","材料图标","icon","10","M22","1","图片","icon_material","transparent","—","static","—","独立素材","`{\"bbox\":[565,196,42,42]}`"],["M24","本局材料数值","text","10","M22","1","CSS","—","—","—","animation","—","—","`{\"bbox\":[625,204,58,31],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":22,\"font_weight\":700,\"color\":\"#F8E6B8\",\"align\":\"left\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}}`"],["M25","矿井主场景容器","area","10","root","1","CSS","—","—","—","static","—","—","`{\"bbox\":[0,290,750,840],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\"}`"],["M26","补给积分条底板","bar","10","M25","1","图片","bar_supply","transparent","—","static","—","无字底板","`{\"bbox\":[205,294,352,42],\"text\":{\"font_size\":14,\"font_weight\":700,\"color\":\"#DDF8FF\",\"align\":\"center\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.9)\"}}`"],["M27","补给积分填充","area","10","M26","1","CSS","—","—","—","animation","—","—","`{\"bbox\":[276,305,169,18],\"bg\":{\"type\":\"rgba\",\"value\":\"rgba(31,183,215,0.95)\",\"blur\":0},\"fill\":\"#1FB7D7\",\"radius\":8,\"border\":\"none\",\"shadow\":\"0 0 6px rgba(45,220,255,0.7)\"}`"],["M28","补给积分文本","text","10","M26","1","CSS","—","—","—","static","—","—","`{\"bbox\":[343,302,76,22],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":14,\"font_weight\":700,\"color\":\"#E6FFFF\",\"align\":\"center\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.9)\"}}`"],["M29","挖掘棋盘容器","area","10","M25","1","图片","panel_dig_grid","transparent","—","static","—","独立素材","`{\"bbox\":[40,363,594,628]}`"],["M30","7×6格子组","area","10","M29","×42","CSS","—","—","—","click","—","—","`[{\"i\":1,\"bbox\":[65,385,72,78]},{\"i\":2,\"bbox\":[139,385,72,78]},{\"i\":3,\"bbox\":[213,385,72,78]},{\"i\":4,\"bbox\":[287,385,72,78]},{\"i\":5,\"bbox\":[361,385,72,78]},{\"i\":6,\"bbox\":[435,385,72,78]},{\"i\":7,\"bbox\":[509,385,72,78]}]`"],["M31","深红色墙面格子","area","10","M30","N","图片","tile_dark_wall","transparent","—","click, animation","—","独立素材","`[{\"i\":1,\"bbox\":[65,385,72,78]},{\"i\":2,\"bbox\":[65,543,72,78]},{\"i\":3,\"bbox\":[509,780,72,78]}]`"],["M32","浅红色沙砖格子","area","10","M30","N","图片","tile_sand","transparent","—","click, animation","—","独立素材","`[{\"i\":1,\"bbox\":[213,464,72,78]},{\"i\":2,\"bbox\":[435,464,72,78]},{\"i\":3,\"bbox\":[287,701,72,78]}]`"],["M33","石砖矿格子-完整","area","10","M30","N","图片","tile_ore_brick","transparent","—","click, animation","—","独立素材","`[{\"i\":1,\"bbox\":[139,464,72,78]},{\"i\":2,\"bbox\":[361,543,72,78]},{\"i\":3,\"bbox\":[435,780,72,78]}]`"],["M34","石砖矿格子-裂开","area","10","M30","N","图片","tile_ore_brick_cracked","transparent","—","animation","变体组：M33","独立素材","`[{\"i\":1,\"bbox\":[213,543,72,78]},{\"i\":2,\"bbox\":[287,622,72,78]}]`"],["M35","红砖盲盒矿格子","area","10","M30","N","图片","tile_mystery_brick","transparent","—","click, animation","—","独立素材","`[{\"i\":1,\"bbox\":[65,622,72,78]},{\"i\":2,\"bbox\":[509,622,72,78]}]`"],["M36","不可敲砖格子","area","10","M30","N","图片","tile_unbreakable","transparent","—","click","—","独立素材","`[{\"i\":1,\"bbox\":[509,385,72,78]}]`"],["M37","宝箱格子","icon","10","M30","N","图片","tile_chest","transparent","—","click, animation","—","独立素材","`[{\"i\":1,\"bbox\":[67,452,68,54]}]`"],["M38","工具格标记","icon","10","M30","N","图片","icon_tool_cell","transparent","—","click, animation","—","独立素材","`[{\"i\":1,\"bbox\":[510,538,68,65]},{\"i\":2,\"bbox\":[438,624,58,58]}]`"],["M39","挖空格/坑道格","area","10","M30","N","图片","tile_empty_tunnel","transparent","—","static","—","独立素材","`[{\"i\":1,\"bbox\":[287,464,72,78]},{\"i\":2,\"bbox\":[361,622,72,78]},{\"i\":3,\"bbox\":[287,859,72,78]}]`"],["M40","矿石素材组","icon","10","M30","×9","图片","ore_set","transparent","—","animation","—","独立素材","`[{\"i\":1,\"bbox\":[182,535,39,42]},{\"i\":2,\"bbox\":[350,397,38,38]},{\"i\":3,\"bbox\":[492,481,40,38]},{\"i\":4,\"bbox\":[163,735,43,47]},{\"i\":5,\"bbox\":[337,728,38,38]},{\"i\":6,\"bbox\":[96,789,40,36]},{\"i\":7,\"bbox\":[237,797,38,38]},{\"i\":8,\"bbox\":[456,800,45,45]},{\"i\":9,\"bbox\":[529,791,42,42]}]`"],["M41","深度线","area","10","M29","1","CSS","—","—","—","static","—","—","`{\"bbox\":[83,453,443,6],\"bg\":{\"type\":\"rgba\",\"value\":\"rgba(255,206,74,0.75)\",\"blur\":0},\"fill\":\"#FFCE4A\",\"radius\":3,\"border\":\"none\",\"shadow\":\"0 0 4px rgba(255,206,74,0.6)\"}`"],["M42","深度侧牌底板","area","10","M29","1","图片","badge_depth","transparent","—","static","—","无字底板","`{\"bbox\":[49,833,98,118],\"text\":{\"font_size\":18,\"font_weight\":700,\"color\":\"#F6D69E\",\"align\":\"center\",\"line_height\":1.4,\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}}`"],["M43","深度侧牌文本","text","10","M42","1","CSS","—","—","—","static","—","—","`{\"bbox\":[65,865,67,65],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":18,\"font_weight\":700,\"color\":\"#F6D69E\",\"align\":\"center\",\"line_height\":1.4,\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}}`"],["M44","真实下一行矿井区域","area","10","M29","×7","CSS","—","—","—","static","—","—","`[{\"i\":1,\"bbox\":[65,938,72,26]},{\"i\":2,\"bbox\":[139,938,72,26]},{\"i\":3,\"bbox\":[213,938,72,26]},{\"i\":4,\"bbox\":[287,938,72,26]},{\"i\":5,\"bbox\":[361,938,72,26]},{\"i\":6,\"bbox\":[435,938,72,26]},{\"i\":7,\"bbox\":[509,938,72,26]}]`"],["M45","炸弹范围预览覆盖层","area","10","M29","1","CSS","—","—","—","animation","—","—","`{\"bbox\":[0,0,1,1],\"visible\":false,\"bg\":{\"type\":\"rgba\",\"value\":\"rgba(255,80,40,0.24)\",\"blur\":0},\"fill\":\"#FF5028\",\"radius\":8,\"border\":\"1px solid rgba(255,210,80,0.7)\",\"shadow\":\"0 0 8px rgba(255,80,40,0.5)\"}`"],["M46","命中/碎裂特效精灵组","icon","10","M29","N","图片","fx_hit_break","transparent","—","animation","—","独立素材","`[{\"i\":1,\"bbox\":[304,476,76,80]}]`"],["M47","爆炸特效精灵组","icon","10","M29","N","图片","fx_explosion","transparent","—","animation","—","独立素材","`[{\"i\":1,\"bbox\":[300,486,78,78]}]`"],["M48","资源飞入精灵组","icon","10","root","N","图片","fx_resource_fly","transparent","—","animation","—","独立素材","`[{\"i\":1,\"bbox\":[369,337,36,36]},{\"i\":2,\"bbox\":[506,337,32,32]}]`"],["M49","右侧工具条底板","bar","10","M25","1","图片","bar_tool_vertical","transparent","—","static","—","无字底板","`{\"bbox\":[648,510,96,365],\"text\":{\"font_size\":14,\"font_weight\":700,\"color\":\"#F8E6B8\",\"align\":\"center\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}}`"],["M50","木镐子工具按钮","btn","10","M49","1","图片","btn_tool_pickaxe","transparent","—","click","—","无字底板","`{\"bbox\":[659,517,74,91],\"text\":{\"font_size\":14,\"font_weight\":700,\"color\":\"#FFF1C2\",\"align\":\"right\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}}`"],["M51","木镐子数量文本","text","10","M50","1","CSS","—","—","—","static","—","—","`{\"bbox\":[704,576,24,22],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":14,\"font_weight\":700,\"color\":\"#FFF1C2\",\"align\":\"right\"}}`"],["M52","横排炸弹工具按钮","btn","10","M49","1","图片","btn_tool_row_bomb","transparent","—","click","—","无字底板","`{\"bbox\":[659,624,74,89],\"text\":{\"font_size\":14,\"font_weight\":700,\"color\":\"#FFF1C2\",\"align\":\"right\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}}`"],["M53","横排炸弹数量文本","text","10","M52","1","CSS","—","—","—","static","—","—","`{\"bbox\":[704,684,24,22],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":14,\"font_weight\":700,\"color\":\"#FFF1C2\",\"align\":\"right\"}}`"],["M54","九宫格炸弹工具按钮","btn","10","M49","1","图片","btn_tool_area_bomb","transparent","—","click","—","无字底板","`{\"bbox\":[659,727,74,89],\"text\":{\"font_size\":14,\"font_weight\":700,\"color\":\"#FFF1C2\",\"align\":\"right\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}}`"],["M55","九宫格炸弹数量文本","text","10","M54","1","CSS","—","—","—","static","—","—","`{\"bbox\":[704,787,24,22],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":14,\"font_weight\":700,\"color\":\"#FFF1C2\",\"align\":\"right\"}}`"],["M56","工具选中高亮","area","10","M49","1","CSS","—","—","—","animation","—","—","`{\"bbox\":[654,512,83,103],\"bg\":{\"type\":\"rgba\",\"value\":\"rgba(255,197,66,0.16)\",\"blur\":0},\"fill\":\"#FFC542\",\"radius\":10,\"border\":\"2px solid #FFC542\",\"shadow\":\"0 0 10px rgba(255,197,66,0.8)\"}`"],["M57","底部安全操作区底板","bar","10","root","1","CSS","—","—","—","static","—","—","`{\"bbox\":[18,1151,721,149],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\"}`"],["M58","背包入口按钮","btn","10","M57","1","图片","btn_backpack","transparent","—","click","—","带字整图","`{\"bbox\":[22,1153,154,129]}`"],["M59","背包图标","icon","10","M58","1","图片","icon_backpack","transparent","—","static","共享：icon_backpack","独立素材","`{\"bbox\":[58,1175,78,65]}`"],["M60","收队返场按钮","btn","10","M57","1","图片","btn_exit_run","transparent","—","click","—","带字整图","`{\"bbox\":[543,1164,167,118]}`"],["M61","Toast 容器","area","100","root","1","CSS","—","—","—","animation","—","—","`{\"bbox\":[183,94,385,54],\"visible\":false,\"bg\":{\"type\":\"rgba\",\"value\":\"rgba(20,12,8,0.88)\",\"blur\":0},\"fill\":\"#140C08\",\"radius\":12,\"border\":\"1px solid #8B5A2B\",\"shadow\":\"0 4px 10px rgba(0,0,0,0.5)\"}`"],["M62","Toast 文本","text","100","M61","1","CSS","—","—","—","static","—","—","`{\"bbox\":[207,108,337,28],\"visible\":false,\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":20,\"font_weight\":700,\"color\":\"#FFF1C2\",\"align\":\"center\"}}`"],["M63","阶段提升提示底板","area","100","root","1","图片","panel_stage_up","transparent","—","animation","—","无字底板","`{\"bbox\":[169,405,412,180],\"visible\":false,\"text\":{\"font_size\":32,\"font_weight\":800,\"color\":\"#FFE8A8\",\"align\":\"center\",\"text_shadow\":\"0 2px 4px rgba(0,0,0,0.8)\"}}`"],["M64","阶段提升提示文本","text","100","M63","2-3","CSS","—","—","—","static","—","—","`[{\"i\":1,\"bbox\":[205,436,340,45],\"visible\":false,\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":32,\"font_weight\":800,\"color\":\"#FFE8A8\",\"align\":\"center\"}},{\"i\":2,\"bbox\":[225,493,300,34],\"visible\":false,\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":24,\"font_weight\":700,\"color\":\"#F4D6A3\",\"align\":\"center\"}}]`"]],"visualRef":"../assets/refs/design-sheets/page_endless_mine.webp","visualExists":true,"imageSize":null,"boxes":{"M01a":{"l":0,"t":0,"w":100,"h":100,"method":"图片","nodeName":"bg","source":"readback","isImage":true},"M01b":{"l":0,"t":0,"w":100,"h":100,"method":"图片","nodeName":"bg","source":"readback","isImage":true},"M01c":{"l":0,"t":0,"w":100,"h":100,"method":"图片","nodeName":"bg","source":"readback","isImage":true},"M01d":{"l":0,"t":0,"w":100,"h":100,"method":"图片","nodeName":"bg","source":"readback","isImage":true},"M01e":{"l":0,"t":0,"w":100,"h":100,"method":"图片","nodeName":"bg","source":"readback","isImage":true},"M02":{"l":0.93,"t":0.82,"w":98.53,"h":5.02,"method":"CSS","nodeName":"bar","source":"readback","isImage":false},"M03":{"l":1.47,"t":1.2,"w":9.2,"h":4.5,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"M04":{"l":15.47,"t":1.8,"w":3.87,"h":2.32,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"M05":{"l":19.87,"t":1.87,"w":7.2,"h":2.17,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"M06":{"l":33.2,"t":1.5,"w":5.07,"h":2.85,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"M07":{"l":40.4,"t":1.87,"w":7.2,"h":2.17,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"M08":{"l":56,"t":1.5,"w":4.8,"h":2.85,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"M09":{"l":63.2,"t":1.87,"w":5.07,"h":2.17,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"M10":{"l":89.6,"t":1.2,"w":8.27,"h":4.5,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"M11":{"l":6,"t":6.52,"w":87.6,"h":4.5,"method":"图片","nodeName":"area","source":"readback","isImage":true},"M12":{"l":10.27,"t":7.87,"w":12.53,"h":1.65,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"M13":{"l":36.27,"t":7.87,"w":25.07,"h":1.65,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"M14":{"l":71.47,"t":7.87,"w":14.93,"h":1.65,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"M15":{"l":2.13,"t":11.99,"w":95.6,"h":8.55,"method":"图片","nodeName":"area","source":"readback","isImage":true},"M16":{"l":4.13,"t":13.72,"w":25.33,"h":4.87,"method":"CSS","nodeName":"area","source":"readback","isImage":false},"M17":{"l":8,"t":14.69,"w":6,"h":3.37,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"M18":{"l":14.8,"t":15.29,"w":12.13,"h":2.32,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"M19":{"l":37.6,"t":13.72,"w":24.13,"h":4.87,"method":"CSS","nodeName":"area","source":"readback","isImage":false},"M20":{"l":44.13,"t":14.69,"w":5.6,"h":3.15,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"M21":{"l":51.87,"t":15.29,"w":7.73,"h":2.32,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"M22":{"l":67.33,"t":13.72,"w":25.33,"h":4.87,"method":"CSS","nodeName":"area","source":"readback","isImage":false},"M23":{"l":75.33,"t":14.69,"w":5.6,"h":3.15,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"M24":{"l":83.33,"t":15.29,"w":7.73,"h":2.32,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"M25":{"l":0,"t":21.74,"w":100,"h":62.97,"method":"CSS","nodeName":"area","source":"readback","isImage":false},"M26":{"l":27.33,"t":22.04,"w":46.93,"h":3.15,"method":"图片","nodeName":"bar","source":"readback","isImage":true},"M27":{"l":36.8,"t":22.86,"w":22.53,"h":1.35,"method":"CSS","nodeName":"area","source":"readback","isImage":false},"M28":{"l":45.73,"t":22.64,"w":10.13,"h":1.65,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"M29":{"l":5.33,"t":27.21,"w":79.2,"h":47.08,"method":"图片","nodeName":"area","source":"readback","isImage":true},"M30":{"l":8.67,"t":28.86,"w":9.6,"h":5.85,"method":"CSS","nodeName":"area","source":"readback","isImage":false},"M31":{"l":8.67,"t":28.86,"w":9.6,"h":5.85,"method":"图片","nodeName":"area","source":"readback","isImage":true},"M32":{"l":28.4,"t":34.78,"w":9.6,"h":5.85,"method":"图片","nodeName":"area","source":"readback","isImage":true},"M33":{"l":18.53,"t":34.78,"w":9.6,"h":5.85,"method":"图片","nodeName":"area","source":"readback","isImage":true},"M34":{"l":28.4,"t":40.7,"w":9.6,"h":5.85,"method":"图片","nodeName":"area","source":"readback","isImage":true},"M35":{"l":8.67,"t":46.63,"w":9.6,"h":5.85,"method":"图片","nodeName":"area","source":"readback","isImage":true},"M36":{"l":67.87,"t":28.86,"w":9.6,"h":5.85,"method":"图片","nodeName":"area","source":"readback","isImage":true},"M37":{"l":8.93,"t":33.88,"w":9.07,"h":4.05,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"M38":{"l":68,"t":40.33,"w":9.07,"h":4.87,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"M39":{"l":38.27,"t":34.78,"w":9.6,"h":5.85,"method":"图片","nodeName":"area","source":"readback","isImage":true},"M40":{"l":24.27,"t":40.1,"w":5.2,"h":3.15,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"M41":{"l":11.07,"t":33.96,"w":59.07,"h":0.45,"method":"CSS","nodeName":"area","source":"readback","isImage":false},"M42":{"l":6.53,"t":62.44,"w":13.07,"h":8.85,"method":"图片","nodeName":"area","source":"readback","isImage":true},"M43":{"l":8.67,"t":64.84,"w":8.93,"h":4.87,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"M44":{"l":8.67,"t":70.31,"w":9.6,"h":1.95,"method":"CSS","nodeName":"area","source":"readback","isImage":false},"M45":{"l":0,"t":0,"w":0.13,"h":0.07,"method":"CSS","nodeName":"area","source":"readback","isImage":false},"M46":{"l":40.53,"t":35.68,"w":10.13,"h":6,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"M47":{"l":40,"t":36.43,"w":10.4,"h":5.85,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"M48":{"l":49.2,"t":25.26,"w":4.8,"h":2.7,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"M49":{"l":86.4,"t":38.23,"w":12.8,"h":27.36,"method":"图片","nodeName":"bar","source":"readback","isImage":true},"M50":{"l":87.87,"t":38.76,"w":9.87,"h":6.82,"method":"图片","nodeName":"btn","source":"readback","isImage":true},"M51":{"l":93.87,"t":43.18,"w":3.2,"h":1.65,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"M52":{"l":87.87,"t":46.78,"w":9.87,"h":6.67,"method":"图片","nodeName":"btn","source":"readback","isImage":true},"M53":{"l":93.87,"t":51.27,"w":3.2,"h":1.65,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"M54":{"l":87.87,"t":54.5,"w":9.87,"h":6.67,"method":"图片","nodeName":"btn","source":"readback","isImage":true},"M55":{"l":93.87,"t":59,"w":3.2,"h":1.65,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"M56":{"l":87.2,"t":38.38,"w":11.07,"h":7.72,"method":"CSS","nodeName":"area","source":"readback","isImage":false},"M57":{"l":2.4,"t":86.28,"w":96.13,"h":11.17,"method":"CSS","nodeName":"bar","source":"readback","isImage":false},"M58":{"l":2.93,"t":86.43,"w":20.53,"h":9.67,"method":"图片","nodeName":"btn","source":"readback","isImage":true},"M59":{"l":7.73,"t":88.08,"w":10.4,"h":4.87,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"M60":{"l":72.4,"t":87.26,"w":22.27,"h":8.85,"method":"图片","nodeName":"btn","source":"readback","isImage":true},"M61":{"l":24.4,"t":7.05,"w":51.33,"h":4.05,"method":"CSS","nodeName":"area","source":"readback","isImage":false},"M62":{"l":27.6,"t":8.1,"w":44.93,"h":2.1,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"M63":{"l":22.53,"t":30.36,"w":54.93,"h":13.49,"method":"图片","nodeName":"area","source":"readback","isImage":true},"M64":{"l":27.33,"t":32.68,"w":45.33,"h":3.37,"method":"CSS","nodeName":"text","source":"readback","isImage":false}}},{"name":"ModalConfirmReturn / modal_confirm_return（返回确认弹窗母版）元素","level":2,"sceneId":"modal_confirm_return","headers":["元素ID","元素名称","类型","层级(z)","父元素","预期数量","实现方式","建议文件名","背景透明","目标比例","交互行为","复用标注","出图方式","视觉数值"],"rows":[["CR01","暗化遮罩","area","100","root","1","CSS","—","—","—","static","—","—","`{\"bbox\":[0,0,750,1334],\"bg\":{\"type\":\"rgba\",\"value\":\"rgba(0,0,0,0.58)\",\"blur\":0},\"fill\":\"#000000\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\"}`"],["CR02","返回确认弹窗底板","modal","100","root","1","图片","modal_confirm_return","opaque","1:1","static","—","无字底板","`{\"bbox\":[64,372,579,555],\"observed_ratio\":1.043,\"shape_mismatch\":\"ok\",\"text\":{\"font_size\":44,\"font_weight\":800,\"color\":\"#FFE6A8\",\"align\":\"center\",\"text_shadow\":\"0 3px 4px rgba(0,0,0,0.8)\"}}`"],["CR03","弹窗标题文本","text","100","CR02","1","CSS","—","—","—","static","—","—","`{\"bbox\":[187,470,376,55],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":44,\"font_weight\":800,\"color\":\"#FFE6A8\",\"align\":\"center\",\"text_shadow\":\"0 3px 4px rgba(0,0,0,0.8)\"}}`"],["CR04","弹窗说明文本","text","100","CR02","1","CSS","—","—","—","static","—","—","`{\"bbox\":[175,610,400,86],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":28,\"font_weight\":700,\"color\":\"#F6E4B8\",\"align\":\"center\",\"line_height\":1.45,\"text_shadow\":\"0 2px 3px rgba(0,0,0,0.8)\"}}`"],["CR05","继续下挖按钮","btn","100","CR02","1","图片","btn_modal_secondary","transparent","—","click","—","无字底板","`{\"bbox\":[118,749,219,83],\"text\":{\"font_size\":30,\"font_weight\":800,\"color\":\"#FFE8AA\",\"align\":\"center\",\"text_stroke\":\"1px #4A2A12\",\"text_shadow\":\"0 2px 3px rgba(0,0,0,0.8)\"}}`"],["CR06","确认返场按钮","btn","100","CR02","1","图片","btn_modal_primary","transparent","—","click","—","无字底板","`{\"bbox\":[365,749,220,83],\"text\":{\"font_size\":30,\"font_weight\":800,\"color\":\"#FFE8AA\",\"align\":\"center\",\"text_stroke\":\"1px #6B2E18\",\"text_shadow\":\"0 2px 3px rgba(0,0,0,0.8)\"}}`"],["CR07","关闭按钮","btn","100","CR02","1","图片","btn_close","transparent","—","click","—","独立素材","`{\"bbox\":[560,359,83,88]}`"]],"visualRef":"../assets/refs/design-sheets/page_modal_confirm_return.webp","visualExists":true,"imageSize":null,"boxes":{"CR01":{"l":0,"t":0,"w":100,"h":100,"method":"CSS","nodeName":"area","source":"readback","isImage":false},"CR02":{"l":8.53,"t":27.89,"w":77.2,"h":41.6,"method":"图片","nodeName":"modal","source":"readback","isImage":true},"CR03":{"l":24.93,"t":35.23,"w":50.13,"h":4.12,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"CR04":{"l":23.33,"t":45.73,"w":53.33,"h":6.45,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"CR05":{"l":15.73,"t":56.15,"w":29.2,"h":6.22,"method":"图片","nodeName":"btn","source":"readback","isImage":true},"CR06":{"l":48.67,"t":56.15,"w":29.33,"h":6.22,"method":"图片","nodeName":"btn","source":"readback","isImage":true},"CR07":{"l":74.67,"t":26.91,"w":11.07,"h":6.6,"method":"图片","nodeName":"btn","source":"readback","isImage":true}}},{"name":"ModalResult / modal_result（本局收获弹窗母版）元素","level":2,"sceneId":"modal_result","headers":["元素ID","元素名称","类型","层级(z)","父元素","预期数量","实现方式","建议文件名","背景透明","目标比例","交互行为","复用标注","出图方式","视觉数值"],"rows":[["R01","暗化遮罩","area","100","root","1","CSS","—","—","—","static","—","—","`{\"bbox\":[0,0,750,1334],\"bg\":{\"type\":\"rgba\",\"value\":\"rgba(0,0,0,0.50)\",\"blur\":0},\"fill\":\"#000000\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\"}`"],["R02","本局收获弹窗底板","modal","100","root","1","图片","modal_result","opaque","3:4","static","—","无字底板","`{\"bbox\":[114,302,494,660],\"observed_ratio\":0.748,\"shape_mismatch\":\"ok\",\"text\":{\"font_size\":48,\"font_weight\":800,\"color\":\"#FFE8AA\",\"align\":\"center\",\"text_shadow\":\"0 3px 4px rgba(0,0,0,0.8)\"}}`"],["R03","弹窗标题文本","text","100","R02","1","CSS","—","—","—","static","—","—","`{\"bbox\":[246,348,258,62],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":48,\"font_weight\":800,\"color\":\"#FFE8AA\",\"align\":\"center\",\"text_shadow\":\"0 3px 4px rgba(0,0,0,0.8)\"}}`"],["R04","本局深度结果文本","text","100","R02","1","CSS","—","—","—","static","—","—","`{\"bbox\":[235,450,280,40],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":30,\"font_weight\":800,\"color\":\"#FFE8AA\",\"align\":\"center\",\"text_shadow\":\"0 2px 3px rgba(0,0,0,0.8)\"}}`"],["R05","收获列表容器","area","100","R02","1","CSS","—","—","—","static","—","—","`{\"bbox\":[167,495,397,330],\"bg\":{\"type\":\"rgba\",\"value\":\"rgba(35,22,14,0.45)\",\"blur\":0},\"fill\":\"#23160E\",\"radius\":8,\"border\":\"1px solid rgba(138,92,50,0.55)\",\"shadow\":\"inset 0 1px 2px rgba(0,0,0,0.35)\"}`"],["R06","金币图标","icon","100","R05","1","图片","icon_coin","transparent","—","static","共享：icon_coin","独立素材","`{\"bbox\":[190,529,74,69]}`"],["R07","矿石图标","icon","100","R05","1","图片","icon_ore","transparent","—","static","共享：icon_ore","独立素材","`{\"bbox\":[193,611,64,72]}`"],["R08","材料图标","icon","100","R05","1","图片","icon_material","transparent","—","static","共享：icon_material","独立素材","`{\"bbox\":[194,707,65,56]}`"],["R09","收获数值文本组","text","100","R05","3","CSS","—","—","—","static","—","—","`[{\"i\":1,\"bbox\":[416,544,91,48],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":40,\"font_weight\":800,\"color\":\"#FFE8AA\",\"align\":\"right\",\"text_shadow\":\"0 2px 3px rgba(0,0,0,0.8)\"}},{\"i\":2,\"bbox\":[446,638,62,42],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":40,\"font_weight\":800,\"color\":\"#FFE8AA\",\"align\":\"right\",\"text_shadow\":\"0 2px 3px rgba(0,0,0,0.8)\"}},{\"i\":3,\"bbox\":[449,719,57,42],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":40,\"font_weight\":800,\"color\":\"#FFE8AA\",\"align\":\"right\",\"text_shadow\":\"0 2px 3px rgba(0,0,0,0.8)\"}}]`"],["R10","返回矿区主页按钮","btn","100","R02","1","图片","btn_modal_primary","transparent","—","click","共享：btn_modal_primary","无字底板","`{\"bbox\":[202,841,319,91],\"text\":{\"font_size\":36,\"font_weight\":800,\"color\":\"#FFE8AA\",\"align\":\"center\",\"text_stroke\":\"1px #5A2E13\",\"text_shadow\":\"0 2px 3px rgba(0,0,0,0.8)\"}}`"],["R11","关闭按钮","btn","100","R02","1","图片","btn_close","transparent","—","click","共享：btn_close","独立素材","`{\"bbox\":[527,299,81,88]}`"]],"visualRef":"../assets/refs/design-sheets/page_modal_result.webp","visualExists":true,"imageSize":null,"boxes":{"R01":{"l":0,"t":0,"w":100,"h":100,"method":"CSS","nodeName":"area","source":"readback","isImage":false},"R02":{"l":15.2,"t":22.64,"w":65.87,"h":49.48,"method":"图片","nodeName":"modal","source":"readback","isImage":true},"R03":{"l":32.8,"t":26.09,"w":34.4,"h":4.65,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"R04":{"l":31.33,"t":33.73,"w":37.33,"h":3,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"R05":{"l":22.27,"t":37.11,"w":52.93,"h":24.74,"method":"CSS","nodeName":"area","source":"readback","isImage":false},"R06":{"l":25.33,"t":39.66,"w":9.87,"h":5.17,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"R07":{"l":25.73,"t":45.8,"w":8.53,"h":5.4,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"R08":{"l":25.87,"t":53,"w":8.67,"h":4.2,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"R09":{"l":55.47,"t":40.78,"w":12.13,"h":3.6,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"R10":{"l":26.93,"t":63.04,"w":42.53,"h":6.82,"method":"图片","nodeName":"btn","source":"readback","isImage":true},"R11":{"l":70.27,"t":22.41,"w":10.8,"h":6.6,"method":"图片","nodeName":"btn","source":"readback","isImage":true}}},{"name":"ModalBlocker / modal_blocker（拦截提示弹窗母版）元素","level":2,"sceneId":"modal_blocker","headers":["元素ID","元素名称","类型","层级(z)","父元素","预期数量","实现方式","建议文件名","背景透明","目标比例","交互行为","复用标注","出图方式","视觉数值"],"rows":[["B01","暗化遮罩","area","100","root","1","CSS","—","—","—","static","—","—","`{\"bbox\":[0,0,750,1334],\"bg\":{\"type\":\"rgba\",\"value\":\"rgba(0,0,0,0.52)\",\"blur\":0},\"fill\":\"#000000\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\"}`"],["B02","拦截提示弹窗底板","modal","100","root","1","图片","modal_blocker","opaque","1:1","static","—","无字底板","`{\"bbox\":[121,406,498,507],\"observed_ratio\":0.982,\"shape_mismatch\":\"ok\",\"text\":{\"font_size\":44,\"font_weight\":800,\"color\":\"#FFE8AA\",\"align\":\"center\",\"text_shadow\":\"0 3px 4px rgba(0,0,0,0.8)\"}}`"],["B03","弹窗标题文本","text","100","B02","1","CSS","—","—","—","static","—","—","`{\"bbox\":[306,471,138,58],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":44,\"font_weight\":800,\"color\":\"#FFE8AA\",\"align\":\"center\",\"text_shadow\":\"0 3px 4px rgba(0,0,0,0.8)\"}}`"],["B04","弹窗说明文本","text","100","B02","1","CSS","—","—","—","static","—","—","`{\"bbox\":[216,632,318,44],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"—\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":30,\"font_weight\":800,\"color\":\"#F8E6B8\",\"align\":\"center\",\"text_shadow\":\"0 2px 3px rgba(0,0,0,0.8)\"}}`"],["B05","确认按钮","btn","100","B02","1","图片","btn_modal_primary","transparent","—","click","共享：btn_modal_primary","无字底板","`{\"bbox\":[225,775,291,86],\"text\":{\"font_size\":36,\"font_weight\":800,\"color\":\"#FFE8AA\",\"align\":\"center\",\"text_stroke\":\"1px #5A2E13\",\"text_shadow\":\"0 2px 3px rgba(0,0,0,0.8)\"}}`"],["B06","关闭按钮","btn","100","B02","1","图片","btn_close","transparent","—","click","共享：btn_close","独立素材","`{\"bbox\":[549,405,70,76]}`"]],"visualRef":"../assets/refs/design-sheets/page_modal_blocker.webp","visualExists":true,"imageSize":null,"boxes":{"B01":{"l":0,"t":0,"w":100,"h":100,"method":"CSS","nodeName":"area","source":"readback","isImage":false},"B02":{"l":16.13,"t":30.43,"w":66.4,"h":38.01,"method":"图片","nodeName":"modal","source":"readback","isImage":true},"B03":{"l":40.8,"t":35.31,"w":18.4,"h":4.35,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"B04":{"l":28.8,"t":47.38,"w":42.4,"h":3.3,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"B05":{"l":30,"t":58.1,"w":38.8,"h":6.45,"method":"图片","nodeName":"btn","source":"readback","isImage":true},"B06":{"l":73.2,"t":30.36,"w":9.33,"h":5.7,"method":"图片","nodeName":"btn","source":"readback","isImage":true}}}]</script>
+<script id="element-preamble" type="application/json">"# 无限矿井无尽模式 元素实现清单\n\n> 生成日期: 2026-06-19  \n> 基于: 需求-最终PRD.md + 架构-设计方案.md  \n> 状态: visual-verified-unreviewed （READ_BACK 读图实测版 · 已按 page 图回填几何/色板/实现方式；skip_review=true，等待人工确认）\n\n## 生成来源\n\n本清单是所有元素信息的唯一权威来源（SSOT），记录**所有元素的结构骨架**：\n- 元素总数: 76\n- 图片实现: 47，CSS 实现: 29\n- 素材集清单: `ore_set=9`\n\n## 清单状态字段约定\n\n| 状态 | 含义 | 填写范围 |\n|------|------|---------|\n| `visual-skeleton` | 骨架版（本阶段产出） | 仅填下表“骨架字段”；“几何/视觉字段”留空或填 `—` |\n| `visual-verified` | 读图实测版（READ_BACK 阶段产出） | 由 `design-read-back` skill 驱动 agent 读 page 图实测回填所有几何字段，并补全场景主色板/间距 |\n| `visual-verified-unreviewed` | 读图完但跳过了人工确认 | 供下游警示使用，仍可消费但标注风险 |\n\n## 改判说明\n\nREAD_BACK 阶段会基于 page 图自动重判最终实现方式：能用 CSS 稳定还原的元素优先 `CSS`，复杂纹理 / 插画 / 角色 / 艺术字 / 复杂光效 / 装饰图 / 场景背景保持 `图片`。人工也可直接修改此文件：\n- CSS → 图片：将「实现方式」设为“图片”，填入「建议文件名」，opaque 元素补「目标比例」，如有跨页面复用则在后续页面的复用标注列写 `共享：{文件名}`\n- 图片 → CSS：将「实现方式」设为“CSS”，“建议文件名”设为 `—`，“目标比例”设为 `—`，清除复用标注\n\n## 共享 UI 素材\n\n| 共享ID | 素材名称 | 建议文件名 | 目标比例（仅 opaque） | 首次出现页面 | 复用页面 |\n|--------|---------|-----------|--------------------|------------|---------|\n| S01 | 返回按钮图标 | icon_back | — | MineHomePage / mine_home | EndlessMinePage / endless_mine |\n| S02 | 设置按钮图标 | icon_setting | — | MineHomePage / mine_home | EndlessMinePage / endless_mine |\n| S03 | 体力图标 | icon_energy | — | MineHomePage / mine_home | EndlessMinePage / endless_mine |\n| S04 | 金币图标 | icon_coin | — | MineHomePage / mine_home | EndlessMinePage / endless_mine, ModalResult / modal_result |\n| S05 | 玉币图标 | icon_premium | — | MineHomePage / mine_home | EndlessMinePage / endless_mine |\n| S06 | 矿石图标 | icon_ore | — | EndlessMinePage / endless_mine | ModalResult / modal_result |\n| S07 | 材料图标 | icon_material | — | EndlessMinePage / endless_mine | ModalResult / modal_result |\n| S08 | 背包图标 | icon_backpack | — | MineHomePage / mine_home | EndlessMinePage / endless_mine |\n| S09 | 关闭按钮 | btn_close | — | ModalConfirmReturn / modal_confirm_return | ModalResult / modal_result, ModalBlocker / modal_blocker |\n| S10 | 弹窗主按钮底板 | btn_modal_primary | — | ModalConfirmReturn / modal_confirm_return | ModalResult / modal_result, ModalBlocker / modal_blocker |\n\n## 游戏物品素材集（asset set，PRD 枚举派生）\n\n> 本节登记由 PRD 数值体系/枚举表派生的**领域对象集合**。各页面主元素表用到该组时仍占 1 行、`建议文件名`=组前缀；本节定义块负责把组前缀展开为 N 个子素材 key。\n\n### ore_set（矿品/矿石，×9）\n\n- 派生公式: ore(普通石, 萤石, 青金石, 紫晶, 蓝晶, 玉石, 火曜石, 陨铁, 星辉石)\n\n| 子素材key | PRD语义名 | 派生维度 | 特效档 |\n|----------|----------|---------|--------|\n| ore_common_stone | 普通石（1级·普通） | grade1 | normal |\n| ore_fluorite | 萤石（2级·入门宝石） | grade2 | normal |\n| ore_lapis | 青金石（3级·稀有） | grade3 | glow |\n| ore_amethyst | 紫晶（4级·珍稀） | grade4 | glow |\n| ore_blue_crystal | 蓝晶（5级·高阶晶石） | grade5 | glow |\n| ore_jade | 玉石（6级·贵重） | grade6 | glow |\n| ore_fire_obsidian | 火曜石（7级·活动稀有） | grade7 | luxury |\n| ore_meteorite_iron | 陨铁（8级·传说） | grade8 | luxury |\n| ore_starlight_stone | 星辉石（9级·神话） | grade9 | luxury |"</script>
+<script id="element-readback-block" type="application/json">"## 视觉数值占位区（READ_BACK 回填）\n\n> 本章节仅保留**场景级** READ_BACK 信息；元素级几何与 CSS 视觉数值直接写回各页面主元素表的 `视觉数值` 列。以下字段在 `visual-skeleton` 阶段**全部留空**，由 `design-read-back` skill 驱动 agent 读 page 图实测后回填；回填完成后清单状态切换为 `visual-verified`。\n\n### MineHomePage / mine_home\n\n**场景主色板**：\n\n| hex | role | weight |\n|-----|------|--------|\n| #1B201F | primary_bg | 0.42 |\n| #6A3A1C | secondary_bg | 0.22 |\n| #D88A33 | accent | 0.16 |\n| #F4D7A4 | text_primary | 0.12 |\n| #28A6D3 | accent | 0.08 |\n\n**间距栅格基数**: 8px\n\n**出图方式终裁**：\n\n| 元素ID | 初判值 | 终裁值 | 理由 |\n|-------|-----|-------|------|\n| H16 | 无字底板 | 带字整图 | 底部导航上的固定标签已作为整板视觉出现，清单无独立标签行，按固定文字烤进整图处理 |\n\n**潜在遗漏（render_suggestion_missing）**：\n\n- 无\n\n**警告**：无\n\n### EndlessMinePage / endless_mine\n\n**场景主色板**：\n\n| hex | role | weight |\n|-----|------|--------|\n| #1C1714 | primary_bg | 0.34 |\n| #743024 | secondary_bg | 0.20 |\n| #B86B39 | accent | 0.18 |\n| #F3D7A2 | text_primary | 0.14 |\n| #25BBD6 | accent | 0.08 |\n\n**间距栅格基数**: 8px\n\n**出图方式终裁**：\n\n| 元素ID | 初判值 | 终裁值 | 理由 |\n|-------|-----|-------|------|\n| M57 | 无字底板 | — | 底部安全操作区本身无独立复杂底板，可由按钮独立呈现，整体容器改判 CSS |\n| M58 | 无字底板 | 带字整图 | 固定“背包”标签在按钮内出现且无独立标签行，按固定文字烤进按钮处理 |\n\n**潜在遗漏（render_suggestion_missing）**：\n\n- M29（挖掘棋盘容器）：棋盘木框与背景矿洞有阴影接触，但仍保持独立素材，待人工确认是否烘焙进背景\n\n**警告**：element_not_visible: M45/M61/M62/M63/M64 为默认态未显示元素，使用低置信占位；asset_set_mixed_fx: ore_set 含 glow/luxury 特效档，下游需按特效档分桶；render_suggestion_missing: M29 棋盘容器可能与背景融合；text_style_inconsistent: HUD 小字统一到 14px。\n\n### ModalConfirmReturn / modal_confirm_return\n\n**场景主色板**：\n\n| hex | role | weight |\n|-----|------|--------|\n| #080909 | primary_bg | 0.46 |\n| #2B1C12 | secondary_bg | 0.24 |\n| #8B4E24 | accent | 0.14 |\n| #FFE6A8 | text_primary | 0.10 |\n| #C03922 | accent | 0.06 |\n\n**间距栅格基数**: 8px\n\n**出图方式终裁**：\n\n| 元素ID | 初判值 | 终裁值 | 理由 |\n|-------|-----|-------|------|\n| CR02 | 无字底板 | 无字底板 | 弹窗标题与说明由独立文本行承载，底板需排除文字供代码叠加 |\n| CR05 | 无字底板 | 无字底板 | 按钮文案为运行时 UI 文本，底板保持无字并由代码叠字 |\n| CR06 | 无字底板 | 无字底板 | 按钮文案为运行时 UI 文本，底板保持无字并由代码叠字 |\n\n**潜在遗漏（render_suggestion_missing）**：\n\n- 无\n\n**警告**：无\n\n### ModalResult / modal_result\n\n**场景主色板**：\n\n| hex | role | weight |\n|-----|------|--------|\n| #0A0B0B | primary_bg | 0.42 |\n| #2B1B11 | secondary_bg | 0.23 |\n| #9B5A28 | accent | 0.15 |\n| #FFE8AA | text_primary | 0.13 |\n| #D9A13A | accent | 0.07 |\n\n**间距栅格基数**: 8px\n\n**出图方式终裁**：\n\n| 元素ID | 初判值 | 终裁值 | 理由 |\n|-------|-----|-------|------|\n| R02 | 无字底板 | 无字底板 | 弹窗标题、深度与收获数据均为代码文本，底板需保持无字 |\n| R10 | 无字底板 | 无字底板 | 主按钮文案作为 UI 文本由代码叠加，底板排除文字 |\n\n**潜在遗漏（render_suggestion_missing）**：\n\n- 无\n\n**警告**：modal_background_over_detailed: 背景矿区细节较具体，但本场景为 modal_archetype，背景仅作暗化上下文，不作为素材来源。\n\n### ModalBlocker / modal_blocker\n\n**场景主色板**：\n\n| hex | role | weight |\n|-----|------|--------|\n| #090909 | primary_bg | 0.44 |\n| #2A1A11 | secondary_bg | 0.24 |\n| #8A4E25 | accent | 0.14 |\n| #FFE8AA | text_primary | 0.12 |\n| #D5962E | accent | 0.06 |\n\n**间距栅格基数**: 8px\n\n**出图方式终裁**：\n\n| 元素ID | 初判值 | 终裁值 | 理由 |\n|-------|-----|-------|------|\n| B02 | 无字底板 | 无字底板 | 弹窗标题与说明由独立文本行承载，底板需排除文字供代码叠加 |\n| B05 | 无字底板 | 无字底板 | 按钮文案作为 UI 文本由代码叠加，底板排除文字 |\n\n**潜在遗漏（render_suggestion_missing）**：\n\n- 无\n\n**警告**：无\n\n## 音频资产（可选）\n\n> 简单音效（点击、成功、错误、奖励）由 `AudioGenerator`（Web Audio API）合成，不需要外部文件。  \n> PRD 未明确要求 BGM 或复杂音效，故无外部音频资产。"</script>
+<script>
+const TAG_COLS = ['img', 'gamesdk', 'component', 'skill'];
+// 固定枚举列：按列名渲染为下拉框（而非自由文本），避免手填值不一致。
+// 元素类型枚举来源：tapd-visual-read SKILL.md「元素类型」列定义（SSOT）。
+const ENUM_COLS = {
+  '元素类型': ['按钮', '图标', '文本', '图片', '列表项', '未知（VM）'],
+  '实现方式': ['CSS', '图片'],
+  '需要图片素材': ['Y', '—'],
+  '背景透明': [
+    { value: 'opaque', label: '否' },
+    { value: 'transparent', label: '是' },
+    { value: '—', label: '—' },
+  ],
+  '出图方式': [
+    { value: '独立素材', label: '独立素材' },
+    { value: '并入背景', label: '并入背景' },
+    { value: '无字底板', label: '无字底板' },
+    { value: '带字整图', label: '带字整图' },
+    { value: '—', label: '—' },
+  ],
+};
+const REUSE_KINDS = [
+  { value: '—', label: '—' },
+  { value: '共享', label: '共享素材' },
+  { value: '变体组', label: '变体组' },
+  { value: '自定义', label: '自定义' },
+];
+function escHtml(v) { return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+function escAttr(v) { return String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+function enumValue(opt) { return typeof opt === 'string' ? opt : opt.value; }
+function enumLabel(opt) { return typeof opt === 'string' ? opt : opt.label; }
+function enumValues(opts) { return opts.map(enumValue); }
+// <img> 加载失败时隐藏图 + 框浮层，显示占位提示（图未放入 visual-refs/）
+function vizFallback(img) { const sv = img.parentElement; img.style.display = 'none'; const ov = sv.querySelector('.viz-overlay'); if (ov) ov.style.display = 'none'; const ph = sv.querySelector('.viz-placeholder'); if (ph) ph.style.display = 'block'; }
+// 框/标签颜色按还原方式区分
+function methodColor(m) { m = m || ''; if (m.indexOf('切图') >= 0) return '#ff4d4f'; if (m.indexOf('SVG') >= 0) return '#722ed1'; if (m.indexOf('数据层') >= 0) return '#fa8c16'; if (m.indexOf('CSS') >= 0) return '#1677ff'; return '#8c8c8c'; }
+// 「显示全部框」开关：一次显出所有 figma 框，便于扫出没被任何框覆盖的区域（遗漏元素）
+function toggleAllBoxes() {
+  showAll = !showAll;
+  document.querySelectorAll('#app .viz-overlay').forEach(ov => ov.classList.toggle('show-all', showAll));
+  const btn = document.getElementById('toggleBoxesBtn');
+  if (btn) btn.textContent = showAll ? '🔳 隐藏全部框' : '🔲 显示全部框（找遗漏）';
+}
+function toggleVisualValues() {
+  hideVisualValues = !hideVisualValues;
+  document.body.classList.toggle('hide-visual-values', hideVisualValues);
+  const btn = document.getElementById('toggleVisualValuesBtn');
+  if (btn) btn.textContent = hideVisualValues ? '👁️ 显示视觉数值列' : '🙈 隐藏视觉数值列';
+}
+function parseReuseTag(v) {
+  const text = String(v || '').trim();
+  if (!text || text === '—') return { kind: '—', target: '' };
+  const share = text.match(/^共享[:：]s*(.+)?$/);
+  if (share) return { kind: '共享', target: (share[1] || '').trim() };
+  const variant = text.match(/^变体组[:：]s*(.+)?$/);
+  if (variant) return { kind: '变体组', target: (variant[1] || '').trim() };
+  return { kind: '自定义', target: text };
+}
+function buildReuseTag(kind, target) {
+  const t = String(target || '').trim();
+  if (kind === '共享') return t ? '共享：' + t : '共享：';
+  if (kind === '变体组') return t ? '变体组：' + t : '变体组：';
+  if (kind === '自定义') return t || '—';
+  return '—';
+}
+// ===== node 点选指认（figma 映射修正入口）=====
+function sceneCode(si) { const m = (data[si].name || '').match(/\bSC\d+\b/); return m ? m[0] : data[si].name; }
+function startPin(si, eid) {
+  pinning = { si, eid };
+  const sc = document.querySelectorAll('#app .scene')[si];
+  const ov = sc && sc.querySelector('.viz-overlay');
+  if (!ov) { alert('该场景无视觉图 / figma 数据，无法指认'); pinning = null; return; }
+  ov.classList.add('pin-mode');
+  document.getElementById('pinTitle').textContent = '指认 ' + eid + '：点击图中该元素的位置 → 自动挂最贴合的 node；或用右侧操作';
+  document.getElementById('pinBar').classList.add('show');
+  sc.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+function endPin() {
+  document.querySelectorAll('#app .viz-overlay.pin-mode').forEach(ov => ov.classList.remove('pin-mode'));
+  pinning = null;
+  document.getElementById('pinBar').classList.remove('show');
+}
+function setFigma(patch) {
+  if (!pinning) return;
+  const cur = figmaChangeLog.get(pinning.eid) || { scene: sceneCode(pinning.si) };
+  Object.assign(cur, patch);
+  figmaChangeLog.set(pinning.eid, cur);
+}
+function pinAtPoint(si, ov, ev) {
+  if (!pinning || pinning.si !== si) return;
+  const rect = ov.getBoundingClientRect();
+  const cx = (ev.clientX - rect.left) / rect.width * 100, cy = (ev.clientY - rect.top) / rect.height * 100;
+  const nodes = data[si].allNodes || [];
+  const hit = nodes.filter(n => cx >= n.l && cx <= n.l + n.w && cy >= n.t && cy <= n.t + n.h).sort((a, b) => (a.w * a.h) - (b.w * b.h))[0];
+  if (!hit) { alert('该位置没有候选 node，点元素中心再试'); return; }
+  setFigma({ nodeId: hit.id, nodeName: hit.name, unmount: undefined });
+  endPin(); render();
+}
+function pinUnmount() { setFigma({ unmount: true, nodeId: undefined, nodeName: undefined }); endPin(); render(); }
+function pinLock() { setFigma({ locked: true }); endPin(); render(); }
+function pinMethod(v) { if (v) setFigma({ '还原方式': v }); }
+const originalData = JSON.parse(document.getElementById('element-data').textContent);
+let data = JSON.parse(JSON.stringify(originalData));
+// Track: {sceneIdx-rowIdx: {type: 'modified'|'added'|'deleted', origRow, newRow}}
+let changeLog = new Map();
+let figmaChangeLog = new Map(); // eid -> {scene, nodeId?, 还原方式?, unmount?, locked?, nodeName?}  figma 映射类修正（→ remap-apply）
+let pinning = null; // {si, eid} node 指认模式
+let showAll = false; // figma 框「显示全部」开关（找遗漏用）
+let hideVisualValues = true; // 视觉数值列默认隐藏，避免大段 JSON 干扰人工核对
+
+function render() {
+  document.body.classList.toggle('hide-visual-values', hideVisualValues);
+  const btnVisual = document.getElementById('toggleVisualValuesBtn');
+  if (btnVisual) btnVisual.textContent = hideVisualValues ? '👁️ 显示视觉数值列' : '🙈 隐藏视觉数值列';
+  const app = document.getElementById('app');
+  app.innerHTML = data.map((scene, si) => {
+    const tagIndices = TAG_COLS.map(t => scene.headers.indexOf(t));
+    const idIdx = scene.headers.indexOf('元素ID');
+    let vizImg = '';
+    if (scene.visualRef) {
+      // figma 框（默认隐藏，hover 行才显其一）；无 figma 数据时 boxesHtml 为空
+      const boxesHtml = scene.boxes ? Object.keys(scene.boxes).map(eid => {
+        const b = scene.boxes[eid];
+        if (b.degraded || b.l == null) return '';
+        const color = methodColor(b.method);
+        const label = escAttr(eid + (b.nodeName ? ' ' + b.nodeName : '') + (b.method ? ' · ' + b.method : ''));
+        return '<div class="viz-box' + (b.manual ? ' manual' : '') + '" data-eid="' + escAttr(eid) + '" data-box-kind="' + (b.isImage ? 'img' : 'css') + '" style="left:' + b.l + '%;top:' + b.t + '%;width:' + b.w + '%;height:' + b.h + '%;border-color:' + color + '">'
+             + '<span class="viz-box-label" style="background:' + color + '">' + label + (b.manual ? ' 🔒' : '') + '</span></div>';
+      }).join('') : '';
+      // 始终输出 <img> 实时加载，放图后刷新即生效（不依赖生成时 existsSync）；失败 → onerror 切占位
+      vizImg = '<div class="scene-visual"><img src="' + escAttr(scene.visualRef) + '" alt="' + escAttr(scene.name) + '" onerror="vizFallback(this)" />'
+             + '<div class="viz-overlay">' + boxesHtml + '<div class="viz-note"></div></div>'
+             + '<div class="viz-placeholder" style="display:none">📷 未找到 page 图: ' + escAttr(scene.visualRef) + '</div></div>';
+    }
+    return `<div class="scene ${vizImg ? 'has-visual' : ''}">
+      <div class="scene-main">
+      <div class="scene-header">
+        <div class="scene-title">${scene.name}</div>
+        <button class="btn btn-green" onclick="addRow(${si})">+ 添加元素</button>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr>${scene.headers.map(h => '<th class="' + (h === '视觉数值' ? 'visual-value-col' : '') + '">' + h + '</th>').join('')}<th>操作</th></tr></thead>
+        <tbody>${scene.rows.map((row, ri) => {
+          const key = si + '-' + ri;
+          const change = changeLog.get(key);
+          const cls = change ? change.type : '';
+          const tags = TAG_COLS.filter((_, i) => {
+            const v = row[tagIndices[i]];
+            return v && v !== '—';
+          });
+          const implVal = row[scene.headers.indexOf('实现方式')] || '';
+          const mergeVal = row[scene.headers.indexOf('出图方式')] || '';
+          const needImgVal = row[scene.headers.indexOf('需要图片素材')] || '';
+          const fileVal = row[scene.headers.indexOf('建议文件名')] || '';
+          const visualVal = row[scene.headers.indexOf('视觉数值')] || '';
+          if (/图片|image/i.test(implVal) || needImgVal === 'Y' || (fileVal && fileVal !== '—')) tags.push('img');
+          if (/CSS/i.test(implVal)) tags.push('css');
+          if (/并入背景/.test(mergeVal)) tags.push('merge');
+          if (/warning|shape_mismatch|severe|uncertain|VMd+/i.test(row.join(' ') + ' ' + visualVal)) tags.push('warning');
+          if (tags.length === 0) tags.push('css');
+          // 待处理标记：含 uncertain / VM### 缺图项 / 元素类型为「未知（VM）」的行
+          const rowJoined = row.join(' ');
+          const attn = (/uncertain/i.test(rowJoined)
+            || /\bVM\d+/i.test(rowJoined)
+            || row.some((c, ci2) => scene.headers[ci2] === '元素类型' && String(c || '').trim() === '未知（VM）')) ? '1' : '';
+          const eid = idIdx >= 0 ? (row[idIdx] || '').trim() : '';
+          const fcls = figmaChangeLog.has(eid) ? ' figma-edited' : '';
+          return `<tr class="${cls}${fcls}" data-tags="${tags.join(' ')}" data-key="${key}" data-attn="${attn}" data-eid="${escAttr(eid)}">
+            ${row.map((cell, ci) => {
+              const header = scene.headers[ci];
+              const enumOpts = ENUM_COLS[header];
+              if (enumOpts) {
+                const cur = (cell || '').trim();
+                const values = enumValues(enumOpts);
+                const inEnum = values.includes(cur);
+                const hasDashOpt = values.includes('—');
+                let opts = '';
+                // 枚举本身未把「—」作正式选项时，补一个空值「—」用于清空（如元素类型）
+                if (!hasDashOpt) opts += '<option value=""' + (cur === '' ? ' selected' : '') + '>—</option>';
+                if (cur && !inEnum) opts += '<option value="' + escAttr(cur) + '" selected>' + escHtml(cur) + '（非标准）</option>';
+                // 枚举含「—」且当前为空时，默认选中「—」
+                const selVal = (hasDashOpt && cur === '') ? '—' : cur;
+                opts += enumOpts.map(o => {
+                  const value = enumValue(o);
+                  const label = enumLabel(o);
+                  return '<option value="' + escAttr(value) + '"' + (value === selVal ? ' selected' : '') + '>' + escHtml(label) + '</option>';
+                }).join('');
+                return '<td class="enum-col ' + (header === '视觉数值' ? 'visual-value-col' : '') + '"><select onchange="editCell(' + si + ',' + ri + ',' + ci + ',this.value)">' + opts + '</select></td>';
+              }
+              if (header === '复用标注') {
+                const reuse = parseReuseTag(cell);
+                const opts = REUSE_KINDS.map(o => '<option value="' + escAttr(o.value) + '"' + (o.value === reuse.kind ? ' selected' : '') + '>' + escHtml(o.label) + '</option>').join('');
+                const disabled = reuse.kind === '—' ? ' disabled' : '';
+                const placeholder = reuse.kind === '共享' ? '如 icon_coin.png' : (reuse.kind === '变体组' ? '如 E01' : '输入标注');
+                return '<td class="reuse-col"><div class="reuse-editor"><select onchange="editReuseKind(' + si + ',' + ri + ',' + ci + ',this.value)">' + opts + '</select><input value="' + escAttr(reuse.target) + '" placeholder="' + escAttr(placeholder) + '" onchange="editReuseTarget(' + si + ',' + ri + ',' + ci + ',this.value)"' + disabled + ' /></div></td>';
+              }
+              const isTagCol = tagIndices.includes(ci);
+              const isFilled = cell && cell !== '—';
+              const tdClass = (isTagCol ? (isFilled ? 'tag-col-has' : 'tag-col-none') : '') + (header === '视觉数值' ? ' visual-value-col' : '');
+              const displayCell = cell || (isTagCol ? '—' : '');
+              return '<td class="' + tdClass + '"><textarea rows="1" onchange="editCell(' + si + ',' + ri + ',' + ci + ',this.value)" oninput="autoResize(this)">' + escHtml(displayCell) + '</textarea></td>';
+            }).join('')}
+            <td class="row-actions">
+              <button onclick="deleteRow(${si},${ri})" title="删除">🗑️</button>
+              <button onclick="duplicateRow(${si},${ri})" title="复制">📋</button>
+              ${(scene.allNodes && eid) ? '<button onclick="startPin(' + si + ',&quot;' + eid + '&quot;)" title="指认/纠正 figma node">🎯</button>' : ''}
+            </td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>
+      </div>
+      ${vizImg}
+    </div>`;
+  }).join('');
+  updateBadge();
+  // 重新应用当前筛选
+  const activeFilter = document.querySelector('.filter-btn.active');
+  if (activeFilter) applyFilter(activeFilter.dataset.filter);
+  // 自适应 textarea 高度
+  document.querySelectorAll('#app textarea').forEach(el => autoResize(el));
+
+  // figma 框 ↔ 元素行 hover 联动（无 figma 数据 → 无 .viz-box，自然不触发）
+  document.querySelectorAll('#app .scene').forEach((sc, si) => {
+    const ov = sc.querySelector('.viz-overlay');
+    if (!ov) return;
+    ov.addEventListener('click', (ev) => { if (ov.classList.contains('pin-mode')) pinAtPoint(si, ov, ev); });
+    const note = ov.querySelector('.viz-note');
+    const clearBoxes = () => { ov.querySelectorAll('.viz-box.show').forEach(b => b.classList.remove('show')); if (note) note.classList.remove('show'); };
+    sc.querySelectorAll('tr[data-eid]').forEach(tr => {
+      const eid = tr.getAttribute('data-eid');
+      if (!eid) return;
+      tr.addEventListener('mouseenter', () => {
+        clearBoxes();
+        const box = ov.querySelector('.viz-box[data-eid="' + eid + '"]');
+        if (box) box.classList.add('show');
+        else if (note) { note.textContent = '⚠ ' + eid + ' 未定位（matcher 未匹配 / 无 figma node）'; note.classList.add('show'); }
+      });
+      tr.addEventListener('mouseleave', clearBoxes);
+    });
+    ov.querySelectorAll('.viz-box').forEach(box => {
+      const eid = box.getAttribute('data-eid');
+      box.addEventListener('mouseenter', () => { const tr = sc.querySelector('tr[data-eid="' + eid + '"]'); if (tr) tr.classList.add('viz-hover'); });
+      box.addEventListener('mouseleave', () => { const tr = sc.querySelector('tr[data-eid="' + eid + '"]'); if (tr) tr.classList.remove('viz-hover'); });
+    });
+  });
+  // 重渲后保持「显示全部框」状态（overlay 被 innerHTML 重建过）
+  if (showAll) document.querySelectorAll('#app .viz-overlay').forEach(ov => ov.classList.add('show-all'));
+}
+
+function editCell(si, ri, ci, val) {
+  // 维度列空值统一回写为 —
+  const headers = data[si].headers;
+  const isTagCol = TAG_COLS.includes(headers[ci]);
+  data[si].rows[ri][ci] = isTagCol && val.trim() === '' ? '—' : val;
+  // 元素类型改为「图片」→ 自动把「需要图片素材」置 Y（联动改值后需重渲染刷新该下拉框）
+  let autoChanged = false;
+  if (headers[ci] === '元素类型' && val === '图片') {
+    const needIdx = headers.indexOf('需要图片素材');
+    if (needIdx >= 0 && data[si].rows[ri][needIdx] !== 'Y') {
+      data[si].rows[ri][needIdx] = 'Y';
+      autoChanged = true;
+    }
+  }
+  markModified(si, ri);
+  // 维度列 / 枚举列内容变化 / 联动改值需要重渲染（更新 td 高亮 + 行 data-tags + 联动下拉框）
+  if (isTagCol || ENUM_COLS[headers[ci]] || autoChanged) {
+    render();
+  } else {
+    updateBadge();
+    const tr = document.querySelector('[data-key="' + si + '-' + ri + '"]');
+    if (tr && !tr.classList.contains('added')) tr.classList.add('modified');
+  }
+}
+
+function editReuseKind(si, ri, ci, kind) {
+  const current = parseReuseTag(data[si].rows[ri][ci]);
+  editCell(si, ri, ci, buildReuseTag(kind, current.target));
+  render();
+}
+
+function editReuseTarget(si, ri, ci, target) {
+  const current = parseReuseTag(data[si].rows[ri][ci]);
+  editCell(si, ri, ci, buildReuseTag(current.kind, target));
+}
+
+function markModified(si, ri) {
+  const key = si + '-' + ri;
+  if (changeLog.has(key) && changeLog.get(key).type === 'added') return; // 新增行不标modified
+  const orig = originalData[si] && originalData[si].rows[ri];
+  if (!orig) return;
+  const changed = JSON.stringify(data[si].rows[ri]) !== JSON.stringify(orig);
+  if (changed) {
+    changeLog.set(key, { type: 'modified', orig, newRow: data[si].rows[ri] });
+  } else {
+    changeLog.delete(key);
+  }
+}
+
+function addRow(si) {
+  const headers = data[si].headers;
+  // 维度列 / 含「—」选项的枚举列（如需要图片素材）默认填「—」，与下拉框默认显示一致
+  const newRow = headers.map(h => (TAG_COLS.includes(h) || h === '复用标注' || (ENUM_COLS[h] && enumValues(ENUM_COLS[h]).includes('—'))) ? '—' : '');
+  // 自动填元素ID
+  const idIdx = headers.indexOf('元素ID');
+  if (idIdx >= 0) {
+    const maxId = data[si].rows.reduce((max, r) => {
+      const m = r[idIdx].match(/E(\d+)/);
+      return m ? Math.max(max, parseInt(m[1])) : max;
+    }, 0);
+    newRow[idIdx] = 'E' + String(maxId + 1).padStart(2, '0');
+  }
+  data[si].rows.push(newRow);
+  const ri = data[si].rows.length - 1;
+  changeLog.set(si + '-' + ri, { type: 'added', newRow });
+  render();
+}
+
+function deleteRow(si, ri) {
+  const key = si + '-' + ri;
+  const existing = changeLog.get(key);
+  if (existing && existing.type === 'added') {
+    // 新增的直接删
+    data[si].rows.splice(ri, 1);
+    changeLog.delete(key);
+    // 重建 changeLog keys
+    rebuildKeys(si);
+  } else {
+    changeLog.set(key, { type: 'deleted', orig: originalData[si].rows[ri] });
+    data[si].rows[ri]._deleted = true;
+  }
+  render();
+}
+
+function duplicateRow(si, ri) {
+  const copy = [...data[si].rows[ri]];
+  const idIdx = data[si].headers.indexOf('元素ID');
+  if (idIdx >= 0) {
+    const maxId = data[si].rows.reduce((max, r) => {
+      const m = (r[idIdx] || '').match(/E(\d+)/);
+      return m ? Math.max(max, parseInt(m[1])) : max;
+    }, 0);
+    copy[idIdx] = 'E' + String(maxId + 1).padStart(2, '0');
+  }
+  data[si].rows.splice(ri + 1, 0, copy);
+  rebuildKeys(si);
+  const newRi = ri + 1;
+  changeLog.set(si + '-' + newRi, { type: 'added', newRow: copy });
+  render();
+}
+
+function rebuildKeys(si) {
+  const newLog = new Map();
+  for (const [k, v] of changeLog) {
+    const [s, r] = k.split('-').map(Number);
+    if (s === si) continue; // 该 scene 的全部重建
+    newLog.set(k, v);
+  }
+  // 重建该 scene
+  data[si].rows.forEach((row, ri) => {
+    const orig = originalData[si] && originalData[si].rows[ri];
+    if (!orig) {
+      newLog.set(si + '-' + ri, { type: 'added', newRow: row });
+    } else if (JSON.stringify(row) !== JSON.stringify(orig)) {
+      newLog.set(si + '-' + ri, { type: 'modified', orig, newRow: row });
+    }
+  });
+  changeLog = newLog;
+}
+
+function updateBadge() {
+  const count = changeLog.size + figmaChangeLog.size;
+  const badge = document.getElementById('changeBadge');
+  badge.style.display = count > 0 ? 'inline' : 'none';
+  badge.textContent = count;
+}
+
+function exportChanges() {
+  if (changeLog.size === 0 && figmaChangeLog.size === 0) { alert('无变更'); return; }
+  let text = '# 设计-元素实现清单 变更记录\n\n';
+  for (const [key, entry] of changeLog) {
+    const [si, ri] = key.split('-').map(Number);
+    const scene = data[si].name;
+    const headers = data[si].headers;
+    if (entry.type === 'added') {
+      const id = entry.newRow[headers.indexOf('元素ID')] || '新元素';
+      text += '【新增】' + scene + ' / ' + id + '\n';
+      headers.forEach((h, i) => { if (entry.newRow[i] && entry.newRow[i] !== '—') text += '  ' + h + ': ' + entry.newRow[i] + '\n'; });
+      text += '\n';
+    } else if (entry.type === 'deleted') {
+      const id = entry.orig[headers.indexOf('元素ID')] || '?';
+      text += '【删除】' + scene + ' / ' + id + '\n\n';
+    } else if (entry.type === 'modified') {
+      const id = entry.newRow[headers.indexOf('元素ID')] || entry.orig[headers.indexOf('元素ID')];
+      text += '【修改】' + scene + ' / ' + id + '\n';
+      headers.forEach((h, i) => {
+        if (entry.orig[i] !== entry.newRow[i]) text += '  ' + h + ': ' + entry.orig[i] + ' → ' + entry.newRow[i] + '\n';
+      });
+      text += '\n';
+    }
+  }
+  if (figmaChangeLog.size) {
+    text += '\n# 设计-figma映射 修正\n';
+    for (const [eid, c] of figmaChangeLog) {
+      const parts = [];
+      if (c.unmount) parts.push('取消挂载');
+      else if (c.nodeId) parts.push('node=' + c.nodeId);
+      if (c['还原方式']) parts.push('还原方式=' + c['还原方式']);
+      if (c.locked && !c.nodeId && !c.unmount) parts.push('锁定');
+      if (parts.length) text += (c.scene || '') + ' ' + eid + ' → ' + parts.join(' ') + (c.nodeName ? '   # ' + c.nodeName : '') + '\n';
+    }
+  }
+  showModal('变更记录', text);
+}
+
+function exportFullMd() {
+  let md = '';
+  const preEl = document.getElementById('element-preamble');
+  const pre = preEl ? JSON.parse(preEl.textContent) : '';
+  if (pre) md += pre + '\n\n';
+  data.forEach(scene => {
+    md += '#'.repeat(scene.level || 2) + ' ' + scene.name + '\n';
+    if (scene.visualMdRef) md += '> 视觉图: ' + scene.visualMdRef + '\n';
+    md += '\n';
+    md += '| ' + scene.headers.join(' | ') + ' |\n';
+    md += '|' + scene.headers.map(() => '---').join('|') + '|\n';
+    scene.rows.forEach(row => {
+      if (row._deleted) return;
+      md += '| ' + row.map(c => c || '—').join(' | ') + ' |\n';
+    });
+    md += '\n';
+  });
+  const rbEl = document.getElementById('element-readback-block');
+  const rb = rbEl ? JSON.parse(rbEl.textContent) : '';
+  if (rb) md += rb + '\n';
+  showModal('完整 MD（可直接覆盖 设计-元素实现清单.md）', md);
+}
+
+function showModal(title, content) {
+  document.getElementById('modalTitle').textContent = title;
+  document.getElementById('modalContent').textContent = content;
+  document.getElementById('modal').classList.add('show');
+}
+function closeModal() { document.getElementById('modal').classList.remove('show'); }
+function copyModal() {
+  navigator.clipboard.writeText(document.getElementById('modalContent').textContent).then(() => alert('已复制'));
+}
+
+function resetAll() {
+  if (!confirm('确定重置所有修改？')) return;
+  data = JSON.parse(JSON.stringify(originalData));
+  changeLog.clear();
+  figmaChangeLog.clear();
+  render();
+}
+
+// 筛选
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    applyFilter(btn.dataset.filter);
+  });
+});
+
+function autoResize(el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; }
+
+// TODO 顶栏「前往」动作：与点击「⚠ 待处理 uncertain/VM」筛选按钮表现一致
+function filterUncertainVM() {
+  const btn = document.querySelector('.filter-btn[data-filter="uncertain-vm"]');
+  if (!btn) return;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  applyFilter('uncertain-vm');
+  btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function applyFilter(filter) {
+  document.querySelectorAll('#app .viz-overlay').forEach(ov => {
+    ov.classList.remove('show-filtered');
+    ov.querySelectorAll('.viz-box.filtered-visible').forEach(b => b.classList.remove('filtered-visible'));
+  });
+  document.querySelectorAll('#app tbody tr').forEach(tr => {
+    if (filter === 'all') { tr.classList.remove('hidden'); return; }
+    if (filter === 'modified') { tr.classList.toggle('hidden', !changeLog.has(tr.dataset.key)); return; }
+    if (filter === 'uncertain-vm') { tr.classList.toggle('hidden', tr.dataset.attn !== '1'); return; }
+    const normalized = filter === 'img-boxes' ? 'img' : filter;
+    tr.classList.toggle('hidden', !(tr.dataset.tags || '').includes(normalized));
+  });
+  if (filter === 'img-boxes') {
+    document.querySelectorAll('#app .scene').forEach(sc => {
+      const ov = sc.querySelector('.viz-overlay');
+      if (!ov) return;
+      ov.classList.add('show-filtered');
+      sc.querySelectorAll('tr[data-eid]:not(.hidden)').forEach(tr => {
+        const eid = tr.getAttribute('data-eid');
+        const box = ov.querySelector('.viz-box[data-eid="' + eid + '"]');
+        if (box && box.dataset.boxKind === 'img') box.classList.add('filtered-visible');
+      });
+    });
+  }
+}
+
+render();
+</script>
+</body>
+</html>

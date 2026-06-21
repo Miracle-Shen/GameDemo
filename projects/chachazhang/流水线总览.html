@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TAPD 流水线总览</title>
+  <style>
+    :root {
+      --bg: #f6f8fa; --card: #ffffff; --fg: #1f2937; --muted: #6b7280;
+      --border: #e5e7eb; --accent: #3b82f6; --accent-light: #eff6ff;
+      --done: #10b981; --blocked: #f59e0b; --pending: #cbd5e1;
+      --warn-bg: #fffbeb;
+      --shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg); color: var(--fg); line-height: 1.6; }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 24px 20px 64px; }
+    .head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+    .head h1 { font-size: 20px; margin: 0; }
+    .head .meta { color: var(--muted); font-size: 13px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      box-shadow: var(--shadow); padding: 20px; margin-bottom: 18px; }
+
+    /* 进度条 */
+    .steps { display: flex; align-items: flex-start; overflow-x: auto; padding-bottom: 6px; }
+    .step { flex: 1 1 0; min-width: 72px; text-align: center; position: relative; }
+    .step:not(:last-child)::after { content: ""; position: absolute; top: 13px; left: 50%; width: 100%;
+      height: 2px; background: var(--pending); z-index: 0; }
+    .step.done:not(:last-child)::after { background: var(--done); }
+    .dot { position: relative; z-index: 1; width: 28px; height: 28px; line-height: 28px; border-radius: 50%;
+      margin: 0 auto 6px; font-size: 13px; color: #fff; background: var(--pending); }
+    .step.done .dot { background: var(--done); }
+    .step.current .dot { background: var(--accent); box-shadow: 0 0 0 4px var(--accent-light); }
+    .step.blocked .dot { background: var(--blocked); box-shadow: 0 0 0 4px var(--warn-bg); }
+    .step .nm { font-size: 12px; color: var(--muted); }
+    .step.current .nm, .step.blocked .nm { color: var(--fg); font-weight: 600; }
+
+    /* 当前步聚焦 */
+    .focus h2 { font-size: 16px; margin: 0 0 4px; }
+    .focus .hint { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+    /* 待办：与产物顶部 TODO 展现一致（橙色框 + 序号圆点，无 checkbox）*/
+    /* 红色：本产物规则 / 重要提示 */
+    .gate-note { display: flex; gap: 12px; align-items: flex-start; background: #fff1f0; border: 1px solid #ffccc7;
+      border-left: 5px solid #f5222d; border-radius: 10px; padding: 12px 16px; margin: 0 0 10px;
+      color: #5c0011; font-size: 13px; line-height: 1.6; }
+    .gate-note .gn-icon { flex: none; font-size: 20px; line-height: 1.4; }
+    .gate-note .gn-line { font-weight: 600; }
+    .gate-note .gn-line + .gn-line { margin-top: 4px; }
+    /* 橙色待办框 */
+    .todobox { display: flex; gap: 12px; align-items: flex-start;
+      background: #fff7e6; border: 1px solid #ffd591; border-left: 5px solid #fa8c16; border-radius: 10px;
+      padding: 12px 16px; color: #613400; }
+    .todobox .todobox-icon { flex: none; font-size: 20px; line-height: 1.4; }
+    .todobox .todobox-body { flex: 1; min-width: 0; }
+    .todobox-title { font-weight: 700; color: #d46b08; font-size: 14px; margin-bottom: 7px; }
+    .gate-name { font-weight: 700; color: #d46b08; margin: 9px 0 5px; font-size: 13px; }
+    .todos { margin: 0; padding: 0; list-style: none; }
+    .todo { display: flex; align-items: flex-start; gap: 9px; padding: 5px 0; font-size: 13px; }
+    .todo + .todo { border-top: 1px dashed #ffd591; }
+    .todo .step-n { display: inline-flex; align-items: center; justify-content: center;
+      width: 18px; height: 18px; border-radius: 50%; background: #fa8c16; color: #fff;
+      font-size: 11px; font-weight: 700; flex: none; margin-top: 2px; }
+    .todo .txt { flex: 1; min-width: 0; }
+    .todo a.go { display: inline-block; margin-left: 8px; vertical-align: baseline;
+      color: #ad4e00; text-decoration: none; white-space: nowrap; font-weight: 600;
+      border: 1px solid #ffd666; border-radius: 5px; padding: 0 9px; background: #fff1b8; }
+    .todo a.go:hover { background: #ffe58f; border-color: #fa8c16; }
+    .empty { color: var(--muted); font-size: 13px; padding: 8px 4px; }
+
+    /* 产物入口 */
+    .arts h3 { font-size: 14px; margin: 0 0 12px; }
+    .art-list { display: flex; flex-wrap: wrap; gap: 10px; }
+    .art { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; color: var(--fg);
+      border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; font-size: 13px; background: #fff; }
+    .art:hover { border-color: var(--accent); }
+    .art.disabled { color: var(--muted); pointer-events: none; opacity: .55; }
+    .art .badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; color: #fff; background: var(--pending); }
+    .art.done .badge { background: var(--done); }
+    .art.current .badge, .art.blocked .badge { background: var(--blocked); }
+
+    .err { color: var(--muted); text-align: center; padding: 48px 0; }
+  </style>
+</head>
+<body>
+  <div class="wrap" id="app">
+    <div class="err">加载中…若长时间无内容，请确认同目录存在 pipeline-status.js</div>
+  </div>
+
+  <script src="./pipeline-status.js"></script>
+  <script>
+    (function () {
+      var app = document.getElementById("app");
+      var ICON = { done: "✓", current: "◉", blocked: "⚠", pending: "" };
+      function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
+        return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]; }); }
+      var lastUpdated = null;
+
+    function render() {
+      var S = window.PIPELINE_STATUS;
+      if (!S) { app.innerHTML = '<div class="err">未找到 pipeline-status.js，流水线尚未初始化。</div>'; return; }
+      lastUpdated = S.meta.updatedAt || "";
+
+      // 头部
+      var html = '<div class="head"><h1>🎬 ' + esc(S.meta.project || "TAPD 流水线") + '</h1>'
+        + '<span class="meta">' + (S.meta.version ? "v" + esc(S.meta.version) + " · " : "")
+        + "更新 " + esc(S.meta.updatedAt || "") + "</span></div>";
+
+      // 进度条
+      html += '<div class="card"><div class="steps">';
+      S.steps.forEach(function (st) {
+        html += '<div class="step ' + st.status + '"><div class="dot">' + (ICON[st.status] || st.id)
+          + '</div><div class="nm">' + esc(st.name) + "</div></div>";
+      });
+      html += "</div></div>";
+
+      // 当前步聚焦
+      var cur = S.steps.filter(function (s) { return s.id === S.current; })[0] || S.steps[0];
+      html += '<div class="card focus"><h2>▶ 当前：' + cur.id + " " + esc(cur.name) + "</h2>";
+      html += '<div class="hint">这步在做：' + esc(cur.hint) + "</div>";
+
+      var gates = (S.gates || []).filter(function (g) { return g.todos && g.todos.length; });
+      var totalTodos = gates.reduce(function (n, g) { return n + g.todos.length; }, 0);
+      var multiGate = gates.length > 1;
+      if (totalTodos > 0) {
+        // 红色：本产物规则 / 重要提示（跨门汇总；note 可为字符串或数组）
+        var notes = [];
+        gates.forEach(function (g) {
+          if (!g.note) return;
+          var lines = (Object.prototype.toString.call(g.note) === "[object Array]") ? g.note : [g.note];
+          lines.forEach(function (n) { if (n) notes.push(n); });
+        });
+        if (notes.length) {
+          html += '<div class="gate-note"><span class="gn-icon">⚠️</span><div>'
+            + notes.map(function (n) { return '<div class="gn-line">' + esc(n) + "</div>"; }).join("")
+            + "</div></div>";
+        }
+
+        // 橙色：待办列表（与产物顶部 TODO 一致——序号圆点，无 checkbox）
+        html += '<div class="todobox"><span class="todobox-icon">📝</span><div class="todobox-body">';
+        html += '<div class="todobox-title">TODO（' + totalTodos + "）</div>";
+        var seq = 0;
+        gates.forEach(function (g) {
+          if (multiGate && g.gateName) html += '<div class="gate-name">' + esc(g.gateName) + "</div>";
+          html += '<ul class="todos">';
+          g.todos.forEach(function (t) {
+            seq += 1;
+            var go = t.link ? '<a class="go" href="./' + esc(t.link) + '">去处理 →</a>' : "";
+            html += '<li class="todo"><span class="step-n">' + seq + '</span>'
+              + '<span class="txt">' + esc(t.text) + go + "</span></li>";
+          });
+          html += "</ul>";
+        });
+        html += "</div></div>";
+      } else {
+        html += '<div class="empty">本步无需手动确认，agent 会自动推进。</div>';
+      }
+
+      html += "</div>";
+
+      // 产物入口
+      html += '<div class="card arts"><h3>📂 产物入口</h3><div class="art-list">';
+      S.artifacts.forEach(function (a) {
+        var cls = "art " + a.state + (a.exists ? "" : " disabled");
+        var label = a.state === "done" ? "完成" : (a.state === "blocked" ? "待确认"
+          : (a.state === "current" ? "进行中" : "未开始"));
+        html += "<" + (a.exists ? 'a href="./' + esc(a.file) + '"' : "span")
+          + ' class="' + cls + '"><span>' + esc(a.name) + '</span>'
+          + '<span class="badge">' + label + "</span></" + (a.exists ? "a" : "span") + ">";
+      });
+      html += "</div></div>";
+
+      app.innerHTML = html;
+    }
+
+    render();
+
+    // 自动轮询：每 4s 重读 pipeline-status.js（file:// 下用带时间戳的 <script> 重注入破缓存），
+    // 仅当 meta.updatedAt 变化才重渲染——避免无谓重绘。
+    function poll() {
+      var s = document.createElement("script");
+      s.src = "./pipeline-status.js?t=" + Date.now();
+      s.onload = function () {
+        var S = window.PIPELINE_STATUS;
+        if (S && (S.meta.updatedAt || "") !== lastUpdated) render();
+        if (s.parentNode) s.parentNode.removeChild(s);
+      };
+      s.onerror = function () { if (s.parentNode) s.parentNode.removeChild(s); };
+      document.body.appendChild(s);
+    }
+    setInterval(poll, 4000);
+    })();
+  </script>
+</body>
+</html>

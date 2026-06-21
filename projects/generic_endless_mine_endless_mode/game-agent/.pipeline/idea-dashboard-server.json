@@ -1,0 +1,9 @@
+{
+  "protocolVersion": 10,
+  "root": "/Users/miracleshen/GameAgent/projects/generic_endless_mine_endless_mode",
+  "port": 4192,
+  "pid": 38264,
+  "ready": true,
+  "dashboardUrl": "http://127.0.0.1:4192/game-agent/%E6%B5%81%E6%B0%B4%E7%BA%BF%E6%80%BB%E8%A7%88.html",
+  "startedAt": "2026/6/21 18:07:22"
+}

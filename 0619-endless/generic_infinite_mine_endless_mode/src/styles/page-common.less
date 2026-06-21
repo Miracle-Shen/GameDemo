@@ -1,0 +1,57 @@
+// ============================================================================
+// 移动端固定画布（fixed-stage）适配 —— 所有页面 / 弹窗共用，禁止各页自写缩放逻辑
+// ----------------------------------------------------------------------------
+// 设计稿坐标系固定为 750 × 1334（若架构 designCanvas 高度不同，同步改本文件 1334
+// 与 src/utils 的 DESIGN_HEIGHT）。缩放比 --scene-scale（无单位）和「设计坐标系下的
+// 视口高」--scene-vh 由 src/main.tsx 的 syncViewport() 在首屏前写入 :root。
+//
+// 关键约束（见 coding-rules §8 / §10.6）：
+//   1. scale() 只能消费无单位变量 var(--scene-scale)；禁止 scale(calc(...vw...)) / scale(min(...))
+//   2. 舞台高度用 var(--scene-vh)，使缩放后正好铺满屏幕高度 → top 锚贴顶、bottom 锚贴真实底
+//   3. 页面壳与弹窗壳都用 translate 居中；禁止用 flexbox 居中 750px 超宽画布（窄屏会偏移裁切）
+// ============================================================================
+
+.page-root {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: var(--color-bg);
+}
+
+.scene-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover; // 全屏背景铺满真实视口，承载高屏留白
+  z-index: 0;
+}
+
+.scene-stage {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 750px;
+  height: var(--scene-vh, 1334px); // 满高 → 舞台底边 = 屏幕底边
+  transform: translateX(-50%) scale(var(--scene-scale, 1));
+  transform-origin: top center;
+}
+
+// 弹窗 / 浮层壳：复用同一 --scene-scale，视口居中。
+// translate 居中（与 .scene-stage 同机制），不要用 flex —— flex 按未缩放的 750px 布局，
+// 窄屏（如 DPR2 的 375 CSS 视口）会把超宽画布靠边、向右溢出裁切。
+.overlay-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+}
+
+.overlay-stage__canvas {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 750px;
+  height: 1334px;
+  transform: translate(-50%, -50%) scale(var(--scene-scale, 1));
+  transform-origin: center;
+}

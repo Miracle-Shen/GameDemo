@@ -1,0 +1,14 @@
+{
+  "source": "BATCH_IMG_GEN",
+  "generated_at": "2026-06-21T10:16:17.801Z",
+  "concepts": [
+    {
+      "scene_id": "concept_a_main",
+      "file_name": "concept_a_main.png",
+      "local_path": "assets/refs/concepts-brainstorm/concept_a_main.png",
+      "image_url": "https://game.kg.qq.com/walle-img-gen/output/bj21BQO6FHyYspbvhm_W4.png",
+      "task_id": "LEJ4GH0nxZldIbcXFL0Bh",
+      "model": "gpt-image-2"
+    }
+  ]
+}

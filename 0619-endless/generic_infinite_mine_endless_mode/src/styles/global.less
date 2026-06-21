@@ -1,0 +1,56 @@
+@import './variables.less';
+
+// ============================================================================
+// 适配策略：固定画布（fixed-stage）—— 见 src/styles/page-common.less + src/main.tsx
+// ----------------------------------------------------------------------------
+// 全部用设计稿 px 直接写样式，由 .scene-stage / .overlay-stage 的 transform:scale(--scene-scale)
+// 统一缩放。⚠️ 不使用 rem / postcss-pxtorem（否则会与舞台缩放叠加成「双重缩放」）：
+//   - 不要在这里写响应式 html{font-size}
+//   - 不要在 index.html 写动态 font-size 脚本
+//   - vite.config.ts 的 postcss 不启用 pxtorem
+// ============================================================================
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#root {
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+}
+
+// ========================================
+// Utility Classes
+// ========================================
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.abs-full {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}

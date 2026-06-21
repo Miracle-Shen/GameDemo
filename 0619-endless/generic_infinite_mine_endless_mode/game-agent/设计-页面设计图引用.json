@@ -1,0 +1,51 @@
+{
+  "source": "BATCH_IMG_GEN",
+  "generated_at": "2026-06-19T11:30:10.459Z",
+  "pages": [
+    {
+      "scene_id": "mine_home",
+      "file_name": "page_mine_home.webp",
+      "local_path": "assets/refs/design-sheets/page_mine_home.webp",
+      "image_url": "https://game.kg.qq.com/walle-img-gen/output/YzleQEJDOp2-MXk7M-EJC.png",
+      "mime_type": "image/webp",
+      "task_id": "H7S7fzlhmDLH7d-fw-tD9",
+      "model": "gpt-image-2"
+    },
+    {
+      "scene_id": "endless_mine",
+      "file_name": "page_endless_mine.webp",
+      "local_path": "assets/refs/design-sheets/page_endless_mine.webp",
+      "image_url": "https://game.kg.qq.com/walle-img-gen/output/IgVqzC_IrhpC2hw15We5P.png",
+      "mime_type": "image/webp",
+      "task_id": "FYM3Xba6H-srCfNPneSHy",
+      "model": "gpt-image-2"
+    },
+    {
+      "scene_id": "modal_confirm_return",
+      "file_name": "page_modal_confirm_return.webp",
+      "local_path": "assets/refs/design-sheets/page_modal_confirm_return.webp",
+      "image_url": "https://game.kg.qq.com/walle-img-gen/output/RvprgE6Y9eOGtsceR8uNL.png",
+      "mime_type": "image/webp",
+      "task_id": "WK8dYZG74pxUzIGWk1HfT",
+      "model": "gpt-image-2"
+    },
+    {
+      "scene_id": "modal_result",
+      "file_name": "page_modal_result.webp",
+      "local_path": "assets/refs/design-sheets/page_modal_result.webp",
+      "image_url": "https://game.kg.qq.com/walle-img-gen/output/rhYG3IV_F0gT_cs11pNZp.png",
+      "mime_type": "image/webp",
+      "task_id": "5Nojy9I8U_mvRQzQ_s_6o",
+      "model": "gpt-image-2"
+    },
+    {
+      "scene_id": "modal_blocker",
+      "file_name": "page_modal_blocker.webp",
+      "local_path": "assets/refs/design-sheets/page_modal_blocker.webp",
+      "image_url": "https://game.kg.qq.com/walle-img-gen/output/K8XYvtGAmLp5PsbGMg4XY.png",
+      "mime_type": "image/webp",
+      "task_id": "b-mJa4R_GqG7LSoFLxocU",
+      "model": "gpt-image-2"
+    }
+  ]
+}
