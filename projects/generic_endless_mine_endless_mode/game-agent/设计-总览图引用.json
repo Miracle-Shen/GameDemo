@@ -1,0 +1,15 @@
+{
+  "source": "BATCH_IMG_GEN",
+  "generated_at": "2026-06-21T11:16:06.997Z",
+  "overviews": [
+    {
+      "scene_id": "allpages",
+      "file_name": "overview_allpages.webp",
+      "local_path": "assets/refs/design-sheets/overview_allpages.webp",
+      "image_url": "https://game.kg.qq.com/walle-img-gen/output/HNH2gMes6QpNpO5Cq0jK9.png",
+      "mime_type": "image/webp",
+      "task_id": "yIk4vYhaKuazAubiZbwHW",
+      "model": "gpt-image-2"
+    }
+  ]
+}

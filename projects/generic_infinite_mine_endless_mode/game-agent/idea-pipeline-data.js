@@ -3,7 +3,7 @@ window.IDEA_PIPELINE_DATA = {
   "meta": {
     "project": "generic_infinite_mine_endless_mode",
     "version": "2026/5/11.01",
-    "updatedAt": "2026/6/21 18:31:10",
+    "updatedAt": "2026/6/22 15:40:47",
     "dashboardFile": "流水线总览.html",
     "dataFile": "idea-pipeline-data.js"
   },

@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>元素实现清单 - READ_BACK 核对编辑器</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; padding: 20px; color: #333; font-size: 13px; }
+h1 { font-size: 22px; margin-bottom: 12px; }
+.toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+.btn { padding: 7px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; }
+.btn-primary { background: #1677ff; color: #fff; }
+.btn-primary:hover { background: #4096ff; }
+.btn-green { background: #52c41a; color: #fff; }
+.btn-green:hover { background: #73d13d; }
+.btn-danger { background: #ff4d4f; color: #fff; }
+.btn-danger:hover { background: #ff7875; }
+.btn-secondary { background: #fff; color: #333; border: 1px solid #ddd; }
+.btn-secondary:hover { background: #f9f9f9; }
+.badge { background: #ff4d4f; color: #fff; border-radius: 10px; padding: 2px 7px; font-size: 11px; margin-left: 6px; }
+.scene { margin-bottom: 24px; }
+.scene.has-visual { display: flex; gap: 20px; align-items: flex-start; }
+.scene-main { flex: 1; min-width: 0; }
+.scene-visual { width: 260px; flex-shrink: 0; position: sticky; top: 20px; align-self: flex-start; }
+.scene-visual img { width: 100%; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); border: 1px solid #e0e0e0; display: block; }
+.viz-placeholder { padding: 20px 12px; border: 2px dashed #ddd; border-radius: 8px; text-align: center; color: #999; font-size: 12px; }
+/* figma 框选浮层：覆盖在视觉图上，默认全透明不挡图；框默认隐藏，hover 元素行才显其一 */
+.viz-overlay { position: absolute; inset: 0; pointer-events: none; }
+.viz-box { position: absolute; border: 2px solid #ff4d4f; border-radius: 3px; box-sizing: border-box; display: none; }
+.viz-box.show { display: block; box-shadow: 0 0 0 9999px rgba(0,0,0,0.04); }
+/* 批量框选模式：默认隐藏；筛选图片元素或显示全部时才批量展示 */
+.viz-overlay.show-filtered .viz-box.filtered-visible { display: block; box-shadow: none; }
+.viz-overlay.show-filtered .viz-box.filtered-visible .viz-box-label { display: none; }
+/* 全显模式：所有框显出来、去聚光、隐标签（只看彩色框，便于扫覆盖盲区）；hover 的那个仍显标签 */
+.viz-overlay.show-all .viz-box { display: block; box-shadow: none; }
+.viz-overlay.show-all .viz-box-label { display: none; }
+.viz-overlay.show-all .viz-box.show .viz-box-label { display: block; }
+.viz-box-label { position: absolute; top: -16px; left: -2px; font-size: 10px; line-height: 14px; padding: 0 4px; border-radius: 3px 3px 3px 0; color: #fff; white-space: nowrap; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+.viz-note { position: absolute; left: 8px; top: 8px; background: #fa8c16; color: #fff; font-size: 11px; padding: 3px 7px; border-radius: 4px; display: none; max-width: 90%; }
+.viz-note.show { display: block; }
+tr.viz-hover td { background: #fff7e6 !important; }
+.box-hint { font-size: 12px; color: #8c8c8c; margin: -6px 0 14px; }
+.box-hint b { color: #595959; }
+.scene-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.scene-title { font-size: 15px; font-weight: 600; padding: 8px 12px; background: #fff; border-radius: 6px; border-left: 4px solid #1677ff; flex: 1; }
+.table-wrap { overflow-x: auto; background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { background: #fafafa; font-weight: 600; text-align: left; padding: 8px 10px; border-bottom: 2px solid #eee; position: sticky; top: 0; font-size: 12px; white-space: nowrap; }
+/* .table-wrap（overflow-x:auto）成为 sticky 包含块且无纵向滚动，叠加顶栏注入的 th { top: var(--pl-topbar-h) }
+   大偏移会把表头钉到表格底部（显示成最后一行）。wrap 内禁用 sticky，表头随表正常置顶。 */
+.table-wrap th { position: static; }
+td { padding: 6px 10px; border-bottom: 1px solid #f0f0f0; max-width: 300px; word-break: break-word; white-space: normal; }
+tr:hover td { background: #f8f9ff; }
+tr.modified td { background: #fffbe6; }
+tr.added td { background: #f6ffed; }
+tr.deleted td { background: #fff1f0; text-decoration: line-through; opacity: 0.6; }
+td.tag-col-has { background: #e6f7e6; }
+td.tag-col-has textarea { color: #389e0d; font-weight: 500; }
+td.tag-col-none textarea { color: #bbb; text-align: center; }
+td textarea { border: 1px solid transparent; background: transparent; font-size: 13px; padding: 2px 4px; border-radius: 3px; width: 100%; min-width: 50px; resize: none; overflow: hidden; font-family: inherit; line-height: 1.4; }
+td textarea:hover { border-color: #d9d9d9; }
+td textarea:focus { border-color: #1677ff; outline: none; background: #fff; }
+td.enum-col { white-space: nowrap; }
+td.enum-col select { border: 1px solid #d9d9d9; background: #fff; font-size: 13px; padding: 3px 6px; border-radius: 4px; font-family: inherit; cursor: pointer; max-width: 160px; }
+td.enum-col select:hover { border-color: #1677ff; }
+td.enum-col select:focus { border-color: #1677ff; outline: none; }
+td.reuse-col { min-width: 210px; }
+.reuse-editor { display: flex; gap: 4px; align-items: center; }
+.reuse-editor select, .reuse-editor input { border: 1px solid #d9d9d9; background: #fff; font-size: 13px; padding: 3px 6px; border-radius: 4px; font-family: inherit; min-width: 0; }
+.reuse-editor select { width: 86px; flex-shrink: 0; cursor: pointer; }
+.reuse-editor input { width: 118px; }
+.reuse-editor input:disabled { background: #f5f5f5; color: #bfbfbf; }
+.field-hint { margin: -8px 0 14px; padding: 8px 10px; border: 1px solid #e6f4ff; background: #f0f7ff; border-radius: 6px; color: #4b5b73; font-size: 12px; }
+.row-actions { white-space: nowrap; }
+.row-actions button { background: none; border: none; cursor: pointer; font-size: 14px; padding: 2px 4px; border-radius: 3px; }
+.row-actions button:hover { background: #f0f0f0; }
+.modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; }
+.modal-overlay.show { display: flex; }
+.modal { background: #fff; border-radius: 12px; padding: 24px; max-width: 800px; width: 90%; max-height: 80vh; overflow-y: auto; }
+.modal h2 { font-size: 18px; margin-bottom: 16px; }
+.modal pre { background: #f5f5f5; padding: 16px; border-radius: 8px; font-size: 12px; white-space: pre-wrap; word-break: break-all; max-height: 50vh; overflow-y: auto; }
+.modal .actions { margin-top: 16px; display: flex; gap: 8px; justify-content: flex-end; }
+.filters { margin-bottom: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
+.filter-btn { padding: 5px 10px; border: 1px solid #ddd; border-radius: 4px; background: #fff; cursor: pointer; font-size: 12px; }
+.filter-btn.active { background: #1677ff; color: #fff; border-color: #1677ff; }
+.filter-btn.filter-attn { color: #d46b08; border-color: #ffd591; background: #fff7e6; }
+.filter-btn.filter-attn.active { background: #fa8c16; color: #fff; border-color: #fa8c16; }
+/* node 点选指认模式 */
+.viz-overlay.pin-mode { pointer-events: auto; cursor: crosshair; background: rgba(22,119,255,.06); }
+.pin-bar { position: sticky; top: 0; z-index: 50; background:#1677ff; color:#fff; padding:8px 12px; border-radius:6px; margin-bottom:10px; display:none; align-items:center; gap:8px; flex-wrap:wrap; font-size:13px; }
+.pin-bar.show { display:flex; }
+.pin-bar button { padding:4px 10px; border:none; border-radius:4px; cursor:pointer; font-size:12px; background:#fff; color:#333; }
+.pin-bar select { padding:3px 6px; border-radius:4px; border:none; font-size:12px; }
+.viz-box.manual { border-style: solid; box-shadow: 0 0 0 1px #fff inset; }
+tr.figma-edited td { background:#e6f4ff !important; }
+.hidden { display: none !important; }
+.hide-visual-values .visual-value-col { display: none !important; }
+</style>
+<style>
+  :root { --pl-topbar-h: 0px; }
+  .pl-topbar { position: sticky; top: 0; z-index: 900;
+    font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    box-shadow: 0 2px 8px rgba(0,0,0,.18); }
+  .pl-topbar .pl-bar { display: flex; align-items: center; gap: 12px; padding: 8px 16px;
+    background: #1f2937; color: #e5e7eb; }
+  .pl-topbar.has-todos .pl-bar { background: #78350f; box-shadow: inset 4px 0 0 #f59e0b; }
+  .pl-topbar .pl-dots { display: flex; gap: 5px; flex-shrink: 0; }
+  .pl-topbar .pl-dot { width: 10px; height: 10px; border-radius: 50%; background: #4b5563; }
+  .pl-topbar .pl-dot.done { background: #10b981; }
+  .pl-topbar .pl-dot.current { background: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,.35); }
+  .pl-topbar .pl-dot.blocked { background: #f59e0b; box-shadow: 0 0 0 2px rgba(245,158,11,.35); }
+  .pl-topbar .pl-label { font-weight: 600; color: #fff; white-space: nowrap; }
+  .pl-topbar .pl-todo-hint { color: #fcd34d; white-space: nowrap; font-weight: 600; }
+  .pl-topbar .pl-spacer { flex: 1; }
+  .pl-topbar a.pl-home { color: #93c5fd; text-decoration: none; white-space: nowrap; font-weight: 600; }
+  .pl-topbar.has-todos a.pl-home { color: #fde68a; }
+  .pl-topbar a.pl-home:hover { text-decoration: underline; }
+  /* 收起/展开按钮：默认展开，点击收起待办面板腾出阅读区 */
+  .pl-topbar .pl-toggle { flex-shrink: 0; cursor: pointer; font: inherit; font-weight: 600; color: inherit;
+    background: transparent; border: 1px solid rgba(255,255,255,.35); border-radius: 6px;
+    padding: 2px 10px; white-space: nowrap; }
+  .pl-topbar .pl-toggle:hover { background: rgba(255,255,255,.14); }
+  .pl-topbar.collapsed .pl-todos { display: none; }
+  /* 本产物待办面板：固定展开。红色=本产物规则/重要提示，橙色=待办 */
+  .pl-todos { background: #fffaf3; border-bottom: 2px solid #fa8c16;
+    padding: 12px 18px; max-height: 48vh; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 10px;
+    font-size: 13.5px; line-height: 1.7; }
+  /* 红色：规则 / 重要提示 */
+  .pl-note { display: flex; gap: 12px; align-items: flex-start;
+    background: #fff1f0; border: 1px solid #ffccc7; border-left: 5px solid #f5222d; border-radius: 10px;
+    padding: 12px 16px; color: #5c0011; box-shadow: 0 1px 4px rgba(245,34,45,0.12); }
+  .pl-note .pl-note-icon { flex-shrink: 0; font-size: 20px; line-height: 1.4; }
+  .pl-note .pl-note-body { flex: 1; }
+  .pl-note .pl-note-line { font-weight: 600; }
+  .pl-note .pl-note-line + .pl-note-line { margin-top: 4px; }
+  .pl-note b { color: #cf1322; }
+  /* 橙色：待办 */
+  .pl-todobox { display: flex; gap: 12px; align-items: flex-start;
+    background: #fff7e6; border: 1px solid #ffd591; border-left: 5px solid #fa8c16; border-radius: 10px;
+    padding: 12px 16px; color: #613400; box-shadow: 0 1px 4px rgba(250,140,22,0.12); }
+  .pl-todobox .pl-todobox-icon { flex-shrink: 0; font-size: 20px; line-height: 1.4; }
+  .pl-todobox .pl-todobox-body { flex: 1; }
+  .pl-todobox .pl-todobox-title { font-weight: 700; color: #d46b08; font-size: 14px; margin-bottom: 7px; }
+  .pl-todos .pl-gate { font-weight: 700; color: #d46b08; margin: 9px 0 5px; font-size: 13px; }
+  .pl-todos ul { margin: 0; padding: 0; list-style: none; }
+  .pl-todos li { display: flex; align-items: flex-start; gap: 9px; padding: 5px 0; }
+  .pl-todos li + li { border-top: 1px dashed #ffd591; }
+  /* 序号圆点 */
+  .pl-todos .pl-step-n { display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; border-radius: 50%; background: #fa8c16; color: #fff;
+    font-size: 11px; font-weight: 700; flex-shrink: 0; margin-top: 2px; }
+  .pl-todos .pl-todo-text { flex: 1; }
+  .pl-todos a.pl-todo-go { display: inline-block; margin-left: 8px; vertical-align: baseline;
+    color: #ad4e00; text-decoration: none; white-space: nowrap; font-weight: 600;
+    border: 1px solid #ffd666; border-radius: 5px; padding: 0 9px; background: #fff1b8; }
+  .pl-todos a.pl-todo-go:hover { background: #ffe58f; border-color: #fa8c16; }
+  .pl-todos .pl-todo-none { color: #237804; font-weight: 600; }
+  @media (prefers-color-scheme: dark) {
+    .pl-todos { background: #2a2118; border-bottom-color: #b45309; }
+  }
+  .pl-anchor-hl { background: #fffbeb; outline: 2px solid #fde68a; outline-offset: 2px;
+    border-radius: 4px; scroll-margin-top: calc(var(--pl-topbar-h) + 12px); }
+  /* 让页面内其他 sticky/fixed 元素让位给顶栏，互不遮挡 */
+  html { scroll-padding-top: calc(var(--pl-topbar-h) + 12px) !important; }
+  .toc { top: var(--pl-topbar-h) !important; height: calc(100vh - var(--pl-topbar-h)) !important; }
+  .edit-toolbar { top: var(--pl-topbar-h) !important; }
+  thead, thead th, table th { top: var(--pl-topbar-h) !important; }
+  .page-with-visual .page-visual, .page-visual, .scene-visual { top: calc(var(--pl-topbar-h) + 16px) !important; }
+</style>
+</head>
+<body>
+<div id="pl-topbar" class="pl-topbar" data-step="6">
+  <div class="pl-bar">
+    <div class="pl-dots"></div><span class="pl-label"></span><span class="pl-todo-hint"></span>
+    <span class="pl-spacer"></span>
+    <a class="pl-home" href="./流水线总览.html">📋 流水线总览 →</a>
+    <button type="button" class="pl-toggle" id="pl-toggle" aria-expanded="true">收起 ▲</button>
+  </div>
+  <div class="pl-todos" id="pl-todos"></div>
+</div>
+<script src="./idea-pipeline-data.js"></script>
+<script>
+(function () {
+  var bar = document.getElementById("pl-topbar");
+  if (!bar) return;
+  function normalizeIdeaStatus(D) {
+    if (!D || !D.steps) return null;
+    var gates = [];
+    var all = D.allStepTodos || {};
+    Object.keys(all).forEach(function (stepId) {
+      (all[stepId] || []).forEach(function (g) {
+        var files = g.artifactFiles || [];
+        var todos = [];
+        (g.todos || []).forEach(function (text) {
+          if (files.length) files.forEach(function (file) { todos.push({ text: text, link: file }); });
+          else todos.push({ text: text, link: "" });
+        });
+        gates.push({ gateName: g.title || g.gate || ("第 " + stepId + " 步"), note: g.note, todos: todos });
+      });
+    });
+    return { current: D.current, steps: D.steps, gates: gates, artifacts: D.artifacts || [] };
+  }
+  var S = window.PIPELINE_STATUS || normalizeIdeaStatus(window.IDEA_PIPELINE_DATA);
+  var dots = bar.querySelector(".pl-dots");
+  var label = bar.querySelector(".pl-label");
+  var hint = bar.querySelector(".pl-todo-hint");
+  var panel = document.getElementById("pl-todos");
+  var toggle = document.getElementById("pl-toggle");
+  var fallback = Number(bar.getAttribute("data-step")) || 1;
+  var currentFile = "";
+  try { currentFile = decodeURIComponent((location.pathname || "").split("/").pop() || ""); }
+  catch (e) { currentFile = (location.pathname || "").split("/").pop() || ""; }
+  function baseName(p) { return String(p || "").split("/").pop(); }
+  // link 形如 "需求-最终PRD.html#reviewPanel" → { file, hash }
+  function parseLink(link) {
+    var s = String(link || ""); var i = s.indexOf("#");
+    return i >= 0 ? { file: s.slice(0, i), hash: s.slice(i + 1) } : { file: s, hash: "" };
+  }
+
+  // 顶栏实测高度写入 --pl-topbar-h，供页面内其他 sticky 元素让位（折叠/展开、resize 后重算）
+  function syncHeight() {
+    document.documentElement.style.setProperty("--pl-topbar-h", bar.offsetHeight + "px");
+  }
+
+  // 收起/展开：默认展开，状态按当前文件名持久化到 localStorage（刷新后保留）
+  var collapseKey;
+  try { collapseKey = "pl-collapse::" + ((location.pathname || "").split("/").pop() || "default"); }
+  catch (e) { collapseKey = "pl-collapse::default"; }
+  function applyCollapsed(collapsed) {
+    bar.classList.toggle("collapsed", collapsed);
+    if (toggle) {
+      toggle.textContent = collapsed ? "展开TODO ▼" : "收起TODO ▲";
+      toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    }
+    syncHeight();
+  }
+  if (toggle) {
+    toggle.addEventListener("click", function () {
+      var next = !bar.classList.contains("collapsed");
+      try { localStorage.setItem(collapseKey, next ? "1" : "0"); } catch (e) {}
+      applyCollapsed(next);
+    });
+  }
+  var savedCollapse = null;
+  try { savedCollapse = localStorage.getItem(collapseKey); } catch (e) {}
+
+  if (!S || !S.steps) {
+    label.textContent = "第 " + fallback + " 步";
+    panel.style.display = "none";
+    if (toggle) toggle.style.display = "none";  // 无待办面板可折叠，隐藏按钮
+    syncHeight();
+    return;
+  }
+  applyCollapsed(savedCollapse === "1");  // 默认展开
+  S.steps.forEach(function (st) {
+    var d = document.createElement("span");
+    d.className = "pl-dot " + st.status;
+    d.title = st.id + " " + st.name;
+    dots.appendChild(d);
+  });
+  var cur = S.steps.filter(function (s) { return s.id === S.current; })[0];
+  if (cur) label.textContent = S.current + "/" + S.steps.length + " " + cur.name;
+  // 本产物自身所属 step：idea2game 可从 artifacts 反查；无匹配时使用 data-step 降级。
+  var artifactStepId = fallback;
+  if (S.artifacts && currentFile) {
+    var art = S.artifacts.filter(function (a) { return baseName(a.file) === currentFile; })[0];
+    if (art && art.stepId) artifactStepId = art.stepId;
+  }
+  var artStep = S.steps.filter(function (s) { return s.id === artifactStepId; })[0];
+  var artStatus = artStep ? artStep.status : "";
+  var artName = artStep ? artStep.name : ("第 " + artifactStepId + " 步");
+  var curName = cur ? cur.name : "";
+
+  // 只展示「本产物」的待办：按 todo.link 文件名与当前页面文件名匹配过滤
+  // （同一步可能跨多个产物，如元素清单校验步含 PRD 回补 + 元素清单编辑两门，各产物只看自己那部分）
+  var gates = (S.gates || []).map(function (g) {
+    var todos = (g.todos || []).filter(function (t) {
+      var f = parseLink(t.link).file;
+      return !!f && (!currentFile || baseName(f) === currentFile);
+    });
+    return { gateName: g.gateName, note: g.note, todos: todos };
+  }).filter(function (g) { return g.todos.length; });
+  var total = gates.reduce(function (n, g) { return n + g.todos.length; }, 0);
+  if (hint) {
+    hint.textContent = total > 0 ? "· 本产物 " + total + " 项待确认"
+      : artStatus === "done" ? "· 本阶段已完成"
+      : artStatus === "current" ? "· 本产物无待办"
+      : "· 本阶段未开始";
+  }
+
+  var multiGate = gates.length > 1;
+  if (total > 0) {
+    bar.classList.add("has-todos");
+    var htmlStr = "";
+
+    // 红色：本产物规则 / 重要提示（note 可为字符串或数组）
+    var notes = [];
+    gates.forEach(function (g) {
+      if (!g.note) return;
+      (Array.isArray(g.note) ? g.note : [g.note]).forEach(function (n) { if (n) notes.push(n); });
+    });
+    if (notes.length) {
+      htmlStr += '<div class="pl-note"><span class="pl-note-icon">⚠️</span><div class="pl-note-body">'
+        + notes.map(function (n) { return '<div class="pl-note-line">' + esc(n) + "</div>"; }).join("")
+        + "</div></div>";
+    }
+
+    // 橙色：待办列表（每条带序号圆点）
+    htmlStr += '<div class="pl-todobox"><span class="pl-todobox-icon">📝</span><div class="pl-todobox-body">';
+    htmlStr += '<div class="pl-todobox-title">TODO（' + total + "）</div>";
+    var seq = 0;
+    gates.forEach(function (g) {
+      if (multiGate && g.gateName) htmlStr += '<div class="pl-gate">' + esc(g.gateName) + "</div>";
+      htmlStr += "<ul>";
+      g.todos.forEach(function (t) {
+        seq += 1;
+        var pl = parseLink(t.link);
+        var sameFile = pl.file && baseName(pl.file) === currentFile;
+        var go = "";
+        if (t.action && /^[A-Za-z_$][\w$]*$/.test(t.action)) {
+          // 本产物内的 JS 动作（如导出变更记录）→ 「前往」直接调用页面内函数（拉起弹窗）
+          go = '<a class="pl-todo-go" href="#" data-action="' + esc(t.action) + '">前往 →</a>';
+        } else if (sameFile && pl.hash) {
+          // 本产物内有锚点 → 「前往」滚动到对应模块（hashchange 触发高亮 + scroll-padding 让位顶栏）
+          go = '<a class="pl-todo-go" href="#' + esc(pl.hash) + '">前往 →</a>';
+        } else if (pl.file && !sameFile) {
+          // 指向别的产物 → 「去处理」跨页跳转（带锚点，目标页自动高亮）
+          go = '<a class="pl-todo-go" href="' + esc(t.link) + '">去处理 →</a>';
+        }
+        htmlStr += '<li><span class="pl-step-n">' + seq + '</span><span class="pl-todo-text">' + esc(t.text || "") + go + "</span></li>";
+      });
+      htmlStr += "</ul>";
+    });
+    htmlStr += "</div></div>";
+
+    panel.innerHTML = htmlStr;
+
+    // 「前往」绑定页面内动作（data-action）→ 调用同文档全局函数（如 exportEdits 拉起变更记录弹窗）
+    panel.addEventListener("click", function (e) {
+      var a = e.target && e.target.closest && e.target.closest(".pl-todo-go[data-action]");
+      if (!a) return;
+      e.preventDefault();
+      var fn = a.getAttribute("data-action");
+      if (typeof window[fn] === "function") window[fn]();
+    });
+  } else {
+    var noneIcon, noneMsg;
+    if (artStatus === "done") {
+      noneIcon = "✅";
+      noneMsg = "✓ 本阶段「" + artName + "」已完成。流水线当前进行到 " + S.current + "/" + S.steps.length + " " + curName + "，其余待办见流水线总览。";
+    } else if (artStatus === "current") {
+      noneIcon = "✅";
+      noneMsg = "✓ 本产物无需手动确认（其他产物待办见流水线总览）";
+    } else {
+      noneIcon = "ℹ️";
+      noneMsg = "本阶段「" + artName + "」尚未开始（流水线当前在第 " + S.current + " 步）。";
+    }
+    panel.innerHTML = '<div class="pl-todobox"><span class="pl-todobox-icon">' + noneIcon + '</span><div class="pl-todobox-body">'
+      + '<span class="pl-todo-none">' + esc(noneMsg) + '</span></div></div>';
+  }
+  syncHeight();
+  window.addEventListener("resize", syncHeight);
+  window.addEventListener("load", syncHeight);
+
+  function esc(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  // 锚点高亮：URL 带 #xxx 时给目标元素加高亮类（先清掉上一个，避免多次跳转累积）
+  function hl() {
+    var id = decodeURIComponent((location.hash || "").slice(1));
+    if (!id) return;
+    var el = document.getElementById(id);
+    if (!el) return;
+    Array.prototype.forEach.call(document.querySelectorAll(".pl-anchor-hl"), function (p) {
+      if (p !== el) p.classList.remove("pl-anchor-hl");
+    });
+    el.classList.add("pl-anchor-hl");
+  }
+  hl();
+  window.addEventListener("hashchange", hl);
+})();
+</script>
+<h1>元素实现清单 READ_BACK 核对编辑器</h1>
+<div class="toolbar">
+  <button class="btn btn-primary" onclick="exportChanges()">📋 导出变更记录<span class="badge" id="changeBadge" style="display:none">0</span></button>
+  <button class="btn btn-secondary" onclick="exportFullMd()">📄 导出完整MD</button>
+  <button class="btn btn-secondary" onclick="resetAll()">↩️ 重置全部</button>
+</div>
+<div class="filters">
+  <button class="filter-btn active" data-filter="all">全部</button>
+  <button class="filter-btn" data-filter="img">图片元素</button>
+  <button class="filter-btn" data-filter="img-boxes">图片元素 + 框选</button>
+  <button class="filter-btn" data-filter="merge">合入背景</button>
+  <button class="filter-btn" data-filter="css">CSS元素</button>
+  <button class="filter-btn" data-filter="modified">已修改</button>
+  <button class="filter-btn filter-attn" data-filter="uncertain-vm">⚠ 待处理 warnings/VM</button>
+  <button class="btn btn-secondary" id="toggleVisualValuesBtn" onclick="toggleVisualValues()">👁️ 显示视觉数值列</button>
+</div>
+<div class="field-hint">字段说明：背景透明「是」= 透明底素材，「否」= 不透明整图直出；出图方式 = 独立素材（单独切图）/ 并入背景（烤进背景、代码不渲染）/ 无字底板（素材无字、文字代码叠）/ 带字整图（文字烤进素材）。</div>
+<div class="box-hint">💡 默认不铺满标注；<b>hover 元素行</b>才高亮单个 READ_BACK bbox。需要批量核对时使用「图片元素 + 框选」筛选或「显示全部框」。已定位 42 / 未定位 0 个。&nbsp; <button class="btn btn-secondary" id="toggleBoxesBtn" onclick="toggleAllBoxes()" style="padding:3px 10px;font-size:12px">🔲 显示全部框（找遗漏）</button></div>
+<div class="pin-bar" id="pinBar">
+  <span id="pinTitle"></span>
+  <select onchange="pinMethod(this.value)"><option value="">还原方式…</option><option>切图</option><option>CSS文本</option><option>数据层</option><option>CSS形状</option><option>SVG</option></select>
+  <button onclick="pinUnmount()">✗ 图中无此元素</button>
+  <button onclick="pinLock()">🔒 锁定当前</button>
+  <button onclick="endPin()">取消</button>
+</div>
+<div id="app"></div>
+
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <h2 id="modalTitle">导出</h2>
+    <pre id="modalContent"></pre>
+    <div class="actions">
+      <button class="btn btn-primary" onclick="copyModal()">📋 复制</button>
+      <button class="btn btn-secondary" onclick="closeModal()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script id="element-data" type="application/json">[{"name":"TitlePage / title（标题页默认态）元素","level":2,"sceneId":"title","headers":["元素ID","元素名称","类型","层级(z)","父元素","预期数量","实现方式","建议文件名","背景透明","目标比例","交互行为","复用标注","出图方式","视觉数值"],"rows":[["T01","标题背景","bg","0","root","1","图片","bg_title","opaque","9:16","static","—","独立素材","`{\"bbox\":[0,0,750,1334],\"observed_ratio\":0.5622,\"shape_mismatch\":\"ok\"}`"],["T02","游戏标题艺术字","text","10","root","1","图片","title_logo","transparent","—","static","—","并入背景","`{\"bbox\":[62,67,619,323]}`"],["T03","进入无尽矿井按钮","btn","10","root","1","图片","btn_enter_mine","transparent","—","click","—","带字整图","`{\"bbox\":[125,1015,503,185]}`"]],"visualRef":"../assets/refs/design-sheets/page_title.webp","visualExists":true,"imageSize":null,"boxes":{"T01":{"l":0,"t":0,"w":100,"h":100,"method":"图片","nodeName":"bg","source":"readback","isImage":true},"T02":{"l":8.27,"t":5.02,"w":82.53,"h":24.21,"method":"图片","nodeName":"text","source":"readback","isImage":true},"T03":{"l":16.67,"t":76.09,"w":67.07,"h":13.87,"method":"图片","nodeName":"btn","source":"readback","isImage":true}}},{"name":"RunPage / endless_run（无尽矿井主游玩界面默认态）元素","level":2,"sceneId":"endless_run","headers":["元素ID","元素名称","类型","层级(z)","父元素","预期数量","实现方式","建议文件名","背景透明","目标比例","交互行为","复用标注","出图方式","视觉数值"],"rows":[["R01a","地表矿区背景","bg","0","root","1","图片","mine_surface_bg","opaque","9:16","static","变体组：R01","独立素材","`{\"bbox\":[0,0,750,1334],\"observed_ratio\":0.5622,\"shape_mismatch\":\"ok\"}`"],["R01b","深地表背景","bg","0","root","1","图片","mine_mid_bg","opaque","9:16","static","变体组：R01","独立素材","`{\"bbox\":[0,0,750,1334],\"observed_ratio\":0.5622,\"shape_mismatch\":\"ok\"}`"],["R01c","浅海背景","bg","0","root","1","图片","mine_shallow_sea_bg","opaque","9:16","static","变体组：R01","独立素材","`{\"bbox\":[0,0,750,1334],\"observed_ratio\":0.5622,\"shape_mismatch\":\"ok\"}`"],["R01d","深海背景","bg","0","root","1","图片","mine_deep_sea_bg","opaque","9:16","static","变体组：R01","独立素材","`{\"bbox\":[0,0,750,1334],\"observed_ratio\":0.5622,\"shape_mismatch\":\"ok\"}`"],["R01e","地心火山泥背景","bg","0","root","1","图片","mine_core_bg","opaque","9:16","static","变体组：R01","独立素材","`{\"bbox\":[0,0,750,1334],\"observed_ratio\":0.5622,\"shape_mismatch\":\"ok\"}`"],["R02","顶部状态栏容器","bar","10","root","1","CSS","—","—","—","static","—","—","`{\"bbox\":[16,13,721,78],\"bg\":{\"type\":\"rgba\",\"value\":\"rgba(43,25,13,0.88)\",\"blur\":0},\"fill\":\"#2B190D\",\"radius\":10,\"border\":\"2px solid #8A5A2A\",\"shadow\":\"0 2px 6px rgba(0,0,0,0.55)\"}`"],["R03","当前深度类型文本","text","10","R02","1","CSS","—","—","—","static","—","—","`{\"bbox\":[64,25,134,38],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"#FFD46A\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":22,\"font_weight\":700,\"color\":\"#FFD46A\",\"align\":\"center\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.7)\"}}`"],["R04","本局推进文本","text","10","R02","1","CSS","—","—","—","static","—","—","`{\"bbox\":[356,33,67,24],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"#C8FF72\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":18,\"font_weight\":700,\"color\":\"#C8FF72\",\"align\":\"center\"}}`"],["R05","本局状态文本","text","10","R02","1","CSS","—","—","—","static","—","—","`{\"bbox\":[590,31,82,29],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"#62E34A\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":20,\"font_weight\":700,\"color\":\"#62E34A\",\"align\":\"center\",\"text_shadow\":\"0 0 4px rgba(98,227,74,0.6)\"}}`"],["R06","顶部收益栏容器","bar","10","root","1","CSS","—","—","—","static","—","—","`{\"bbox\":[16,91,721,73],\"bg\":{\"type\":\"rgba\",\"value\":\"rgba(22,15,10,0.86)\",\"blur\":0},\"fill\":\"#160F0A\",\"radius\":8,\"border\":\"1px solid #60411F\",\"shadow\":\"0 2px 5px rgba(0,0,0,0.55)\"}`"],["R07","金币数值文本","text","10","R06","1","CSS","—","—","—","static","—","—","`{\"bbox\":[134,106,115,27],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"#F8D37A\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":20,\"font_weight\":700,\"color\":\"#F8D37A\",\"align\":\"left\"}}`"],["R08","矿石数值文本","text","10","R06","1","CSS","—","—","—","static","—","—","`{\"bbox\":[356,107,100,27],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"#EBD8C2\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":20,\"font_weight\":700,\"color\":\"#EBD8C2\",\"align\":\"left\"}}`"],["R09","材料数值文本","text","10","R06","1","CSS","—","—","—","static","—","—","`{\"bbox\":[554,107,78,27],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"#EBD8C2\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":20,\"font_weight\":700,\"color\":\"#EBD8C2\",\"align\":\"left\"}}`"],["R10","Pixi 棋盘视口容器","area","10","root","1","CSS","—","—","—","click","—","—","`{\"bbox\":[62,365,628,579],\"bg\":{\"type\":\"rgba\",\"value\":\"rgba(35,20,12,0.18)\",\"blur\":0},\"fill\":\"#23140C\",\"radius\":6,\"border\":\"none\",\"shadow\":\"0 6px 12px rgba(0,0,0,0.45)\"}`"],["R11","矿井棋盘格素材组","icon","10","R10","×9","图片","mine_blocks_tiles","transparent","—","click, animation","—","独立素材","`[{\"i\":1,\"bbox\":[62,365,69,71]},{\"i\":2,\"bbox\":[137,365,68,71]},{\"i\":3,\"bbox\":[212,365,69,71]},{\"i\":4,\"bbox\":[287,365,69,71]},{\"i\":5,\"bbox\":[362,365,69,71]},{\"i\":6,\"bbox\":[437,365,69,71]},{\"i\":7,\"bbox\":[512,365,69,71]},{\"i\":8,\"bbox\":[587,365,69,71]},{\"i\":9,\"bbox\":[662,365,28,71]}]`"],["R12","深度线","area","10","R10","1","CSS","—","—","—","static","—","—","`{\"bbox\":[0,761,750,5],\"bg\":{\"type\":\"rgba\",\"value\":\"rgba(242,170,52,0.95)\",\"blur\":0},\"fill\":\"#F2AA34\",\"radius\":2,\"border\":\"none\",\"shadow\":\"0 0 4px rgba(255,190,56,0.8)\"}`"],["R13","深度牌容器","area","10","root","1","图片","panel_depth","transparent","—","static","—","无字底板","`{\"bbox\":[28,178,109,116],\"text\":{\"font_size\":20,\"font_weight\":700,\"color\":\"#F4D38B\",\"align\":\"center\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.75)\"}}`"],["R14","当前深度文本","text","10","R13","1","CSS","—","—","—","static","—","—","`{\"bbox\":[55,237,67,36],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"#F4D38B\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":24,\"font_weight\":700,\"color\":\"#F4D38B\",\"align\":\"center\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.75)\"}}`"],["R15","补给条容器","area","10","root","1","图片","panel_supply","transparent","—","static","—","无字底板","`{\"bbox\":[156,183,563,67],\"text\":{\"font_size\":16,\"font_weight\":700,\"color\":\"#F4D38B\",\"align\":\"right\"}}`"],["R16","补给进度填充","area","10","R15","1","CSS","—","—","—","animation","—","—","`{\"bbox\":[346,196,82,11],\"bg\":{\"type\":\"rgba\",\"value\":\"rgba(94,226,72,0.95)\",\"blur\":0},\"fill\":\"#5EE248\",\"radius\":3,\"border\":\"none\",\"shadow\":\"0 0 3px rgba(94,226,72,0.75)\"}`"],["R17","补给进度文本","text","10","R15","1","CSS","—","—","—","static","—","—","`{\"bbox\":[356,188,320,33],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"#F4D38B\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":16,\"font_weight\":700,\"color\":\"#F4D38B\",\"align\":\"right\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.75)\"}}`"],["R18","底部工具栏底板","bar","10","root","1","图片","bar_tool","transparent","—","static","—","无字底板","`{\"bbox\":[47,1067,661,252],\"text\":{\"font_size\":16,\"font_weight\":700,\"color\":\"#F8D37A\",\"align\":\"center\"}}`"],["R19","镐子工具按钮","btn","10","R18","1","图片","btn_tool_slot","transparent","—","click","—","无字底板","`{\"bbox\":[58,1074,135,229],\"text\":{\"font_size\":18,\"font_weight\":700,\"color\":\"#F8D37A\",\"align\":\"center\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}}`"],["R20","横炸工具按钮","btn","10","R18","1","图片","btn_tool_slot","transparent","—","click","共享：btn_tool_slot","无字底板","`{\"bbox\":[214,1080,111,221],\"text\":{\"font_size\":18,\"font_weight\":700,\"color\":\"#F8D37A\",\"align\":\"center\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}}`"],["R21","九炸工具按钮","btn","10","R18","1","图片","btn_tool_slot","transparent","—","click","共享：btn_tool_slot","无字底板","`{\"bbox\":[365,1080,111,221],\"text\":{\"font_size\":18,\"font_weight\":700,\"color\":\"#F8D37A\",\"align\":\"center\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}}`"],["R22","木镐图标","icon","10","R19","1","图片","hud_pickaxe_icon","transparent","—","static","—","独立素材","`{\"bbox\":[78,1076,91,91]}`"],["R23","横排炸弹图标","icon","10","R20","1","图片","hud_row_bomb_icon","transparent","—","static","—","独立素材","`{\"bbox\":[229,1086,82,82]}`"],["R24","九宫格炸弹图标","icon","10","R21","1","图片","hud_area_bomb_icon","transparent","—","static","—","独立素材","`{\"bbox\":[379,1086,82,82]}`"],["R25","背包按钮","btn","10","R18","1","图片","btn_bag","transparent","—","click","—","带字整图","`{\"bbox\":[503,1078,91,218]}`"],["R26","收队返场按钮","btn","10","R18","1","图片","btn_return_camp","transparent","—","click","—","带字整图","`{\"bbox\":[617,1138,100,172]}`"],["R27","工具数量文本组","text","10","R18","×3","CSS","—","—","—","static","—","—","`[{\"i\":1,\"bbox\":[93,1203,69,62],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"#F8D37A\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":18,\"font_weight\":700,\"color\":\"#F8D37A\",\"align\":\"center\",\"line_height\":1.2,\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}},{\"i\":2,\"bbox\":[239,1203,60,62],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"#F8D37A\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":18,\"font_weight\":700,\"color\":\"#F8D37A\",\"align\":\"center\",\"line_height\":1.2,\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}},{\"i\":3,\"bbox\":[390,1203,60,62],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"#F8D37A\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":18,\"font_weight\":700,\"color\":\"#F8D37A\",\"align\":\"center\",\"line_height\":1.2,\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}}]`"],["R28","Toast 提示层","text","100","root","1","CSS","—","—","—","animation","—","—","`{\"bbox\":[165,585,420,56],\"visible\":false,\"bg\":{\"type\":\"rgba\",\"value\":\"rgba(0,0,0,0.65)\",\"blur\":0},\"fill\":\"#000000\",\"radius\":28,\"border\":\"none\",\"shadow\":\"0 2px 8px rgba(0,0,0,0.45)\",\"text\":{\"font_size\":22,\"font_weight\":600,\"color\":\"#FFFFFF\",\"align\":\"center\"}}`"]],"visualRef":"../assets/refs/design-sheets/page_endless_run.webp","visualExists":true,"imageSize":null,"boxes":{"R01a":{"l":0,"t":0,"w":100,"h":100,"method":"图片","nodeName":"bg","source":"readback","isImage":true},"R01b":{"l":0,"t":0,"w":100,"h":100,"method":"图片","nodeName":"bg","source":"readback","isImage":true},"R01c":{"l":0,"t":0,"w":100,"h":100,"method":"图片","nodeName":"bg","source":"readback","isImage":true},"R01d":{"l":0,"t":0,"w":100,"h":100,"method":"图片","nodeName":"bg","source":"readback","isImage":true},"R01e":{"l":0,"t":0,"w":100,"h":100,"method":"图片","nodeName":"bg","source":"readback","isImage":true},"R02":{"l":2.13,"t":0.97,"w":96.13,"h":5.85,"method":"CSS","nodeName":"bar","source":"readback","isImage":false},"R03":{"l":8.53,"t":1.87,"w":17.87,"h":2.85,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"R04":{"l":47.47,"t":2.47,"w":8.93,"h":1.8,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"R05":{"l":78.67,"t":2.32,"w":10.93,"h":2.17,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"R06":{"l":2.13,"t":6.82,"w":96.13,"h":5.47,"method":"CSS","nodeName":"bar","source":"readback","isImage":false},"R07":{"l":17.87,"t":7.95,"w":15.33,"h":2.02,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"R08":{"l":47.47,"t":8.02,"w":13.33,"h":2.02,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"R09":{"l":73.87,"t":8.02,"w":10.4,"h":2.02,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"R10":{"l":8.27,"t":27.36,"w":83.73,"h":43.4,"method":"CSS","nodeName":"area","source":"readback","isImage":false},"R11":{"l":8.27,"t":27.36,"w":9.2,"h":5.32,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"R12":{"l":0,"t":57.05,"w":100,"h":0.37,"method":"CSS","nodeName":"area","source":"readback","isImage":false},"R13":{"l":3.73,"t":13.34,"w":14.53,"h":8.7,"method":"图片","nodeName":"area","source":"readback","isImage":true},"R14":{"l":7.33,"t":17.77,"w":8.93,"h":2.7,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"R15":{"l":20.8,"t":13.72,"w":75.07,"h":5.02,"method":"图片","nodeName":"area","source":"readback","isImage":true},"R16":{"l":46.13,"t":14.69,"w":10.93,"h":0.82,"method":"CSS","nodeName":"area","source":"readback","isImage":false},"R17":{"l":47.47,"t":14.09,"w":42.67,"h":2.47,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"R18":{"l":6.27,"t":79.99,"w":88.13,"h":18.89,"method":"图片","nodeName":"bar","source":"readback","isImage":true},"R19":{"l":7.73,"t":80.51,"w":18,"h":17.17,"method":"图片","nodeName":"btn","source":"readback","isImage":true},"R20":{"l":28.53,"t":80.96,"w":14.8,"h":16.57,"method":"图片","nodeName":"btn","source":"readback","isImage":true},"R21":{"l":48.67,"t":80.96,"w":14.8,"h":16.57,"method":"图片","nodeName":"btn","source":"readback","isImage":true},"R22":{"l":10.4,"t":80.66,"w":12.13,"h":6.82,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"R23":{"l":30.53,"t":81.41,"w":10.93,"h":6.15,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"R24":{"l":50.53,"t":81.41,"w":10.93,"h":6.15,"method":"图片","nodeName":"icon","source":"readback","isImage":true},"R25":{"l":67.07,"t":80.81,"w":12.13,"h":16.34,"method":"图片","nodeName":"btn","source":"readback","isImage":true},"R26":{"l":82.27,"t":85.31,"w":13.33,"h":12.89,"method":"图片","nodeName":"btn","source":"readback","isImage":true},"R27":{"l":12.4,"t":90.18,"w":9.2,"h":4.65,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"R28":{"l":22,"t":43.85,"w":56,"h":4.2,"method":"CSS","nodeName":"text","source":"readback","isImage":false}}},{"name":"SettlementPage / settlement（本局收获结算页默认态）元素","level":2,"sceneId":"settlement","headers":["元素ID","元素名称","类型","层级(z)","父元素","预期数量","实现方式","建议文件名","背景透明","目标比例","交互行为","复用标注","出图方式","视觉数值"],"rows":[["S01","结算页背景","bg","0","root","1","图片","mine_surface_bg","opaque","9:16","static","共享：mine_surface_bg","独立素材","`{\"bbox\":[0,0,750,1334],\"observed_ratio\":0.5622,\"shape_mismatch\":\"ok\"}`"],["S02","本局收获结算标题","text","10","root","1","图片","title_settlement","transparent","—","static","—","并入背景","`{\"bbox\":[105,140,539,145]}`"],["S03","结算结果面板","area","10","root","1","图片","panel_result","transparent","—","static","—","无字底板","`{\"bbox\":[76,316,599,675],\"text\":{\"font_size\":26,\"font_weight\":700,\"color\":\"#F2C56A\",\"align\":\"right\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}}`"],["S04","结算数据文本组","text","10","S03","×6","CSS","—","—","—","static","—","—","`[{\"i\":1,\"bbox\":[154,382,460,54],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"#F2C56A\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":26,\"font_weight\":700,\"color\":\"#F2C56A\",\"align\":\"right\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}},{\"i\":2,\"bbox\":[154,462,460,54],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"#D95C43\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":24,\"font_weight\":700,\"color\":\"#D95C43\",\"align\":\"right\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}},{\"i\":3,\"bbox\":[154,542,460,54],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"#F2C56A\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":26,\"font_weight\":700,\"color\":\"#F2C56A\",\"align\":\"right\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}},{\"i\":4,\"bbox\":[154,622,460,54],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"#F2C56A\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":26,\"font_weight\":700,\"color\":\"#F2C56A\",\"align\":\"right\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}},{\"i\":5,\"bbox\":[154,704,460,54],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"#F2C56A\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":26,\"font_weight\":700,\"color\":\"#F2C56A\",\"align\":\"right\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}},{\"i\":6,\"bbox\":[154,782,460,54],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"#F2C56A\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":26,\"font_weight\":700,\"color\":\"#F2C56A\",\"align\":\"right\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.8)\"}}]`"],["S05","再来一局按钮","btn","10","root","1","图片","btn_replay","transparent","—","click","—","带字整图","`{\"bbox\":[107,1022,265,125]}`"],["S06","返回标题按钮","btn","10","root","1","图片","btn_back_title","transparent","—","click","—","带字整图","`{\"bbox\":[396,1022,258,125]}`"],["S07","结算原因提示文本","text","10","S03","1","CSS","—","—","—","static","—","—","`{\"bbox\":[165,896,420,36],\"bg\":{\"type\":\"none\",\"value\":\"transparent\",\"blur\":0},\"fill\":\"#EBD8B0\",\"radius\":0,\"border\":\"none\",\"shadow\":\"none\",\"text\":{\"font_size\":16,\"font_weight\":600,\"color\":\"#EBD8B0\",\"align\":\"center\",\"text_shadow\":\"0 1px 2px rgba(0,0,0,0.75)\"}}`"]],"visualRef":"../assets/refs/design-sheets/page_settlement.webp","visualExists":true,"imageSize":null,"boxes":{"S01":{"l":0,"t":0,"w":100,"h":100,"method":"图片","nodeName":"bg","source":"readback","isImage":true},"S02":{"l":14,"t":10.49,"w":71.87,"h":10.87,"method":"图片","nodeName":"text","source":"readback","isImage":true},"S03":{"l":10.13,"t":23.69,"w":79.87,"h":50.6,"method":"图片","nodeName":"area","source":"readback","isImage":true},"S04":{"l":20.53,"t":28.64,"w":61.33,"h":4.05,"method":"CSS","nodeName":"text","source":"readback","isImage":false},"S05":{"l":14.27,"t":76.61,"w":35.33,"h":9.37,"method":"图片","nodeName":"btn","source":"readback","isImage":true},"S06":{"l":52.8,"t":76.61,"w":34.4,"h":9.37,"method":"图片","nodeName":"btn","source":"readback","isImage":true},"S07":{"l":22,"t":67.17,"w":56,"h":2.7,"method":"CSS","nodeName":"text","source":"readback","isImage":false}}}]</script>
+<script id="element-preamble" type="application/json">"# 《无限矿井》无尽模式 元素实现清单\n\n> 生成日期: 2026-06-21  \n> 基于: 需求-最终PRD.md + 架构-设计方案.md  \n> 状态: visual-verified-unreviewed （读图实测版 · 几何/色板已回填；跳过人工确认，等待 review 后切换 visual-verified；生成时刻 2026-06-21）\n\n> ⚠️ **视觉审批覆盖声明**：`需求-最终PRD.md` 中仍包含旧的 `1152 x 768`、`1536*1024` 或横向资源描述。用户视觉审批阶段已覆盖为**竖屏移动端单屏设计目标**；本清单不修改 PRD 文件，但所有页面场景画布比例与 opaque 背景目标比例均锁定为 `9:16`。\n\n## 生成来源\n\n本清单是所有元素信息的唯一权威来源（SSOT），记录**所有元素的结构骨架**：\n- 元素总数: 41（页面主元素 32 + 游戏物品素材集子素材 9）\n- 图片实现: 26（页面图片行 17 + 素材集子素材 9），CSS 实现: 15\n- 素材集清单: `mine_blocks_tiles=9`\n- 本次竖屏覆盖后数量变化: 无；仅将页面/背景比例从旧横屏调整为 `9:16`\n\n## 清单状态字段约定\n\n| 状态 | 含义 | 填写范围 |\n|------|------|---------|\n| `visual-skeleton` | 骨架版（本阶段产出） | 仅填下表“骨架字段”；“几何/视觉字段”留空或填 `—` |\n| `visual-verified` | 读图实测版（READ_BACK 阶段产出） | 由 `design-read-back` skill 驱动 agent 读 page 图实测回填所有几何字段，并补全场景主色板/间距 |\n| `visual-verified-unreviewed` | 读图完但跳过人工确认 | 供下游警示使用，仍可消费但标注风险 |\n\n## 改判说明\n\nREAD_BACK 阶段会基于 page 图自动重判最终实现方式：能用 CSS 稳定还原的元素优先 `CSS`，复杂纹理 / 插画 / 角色 / 艺术字 / 复杂光效 / 装饰图 / 场景背景保持 `图片`。人工也可直接修改此文件：\n- CSS → 图片：将「实现方式」设为“图片”，填入「建议文件名」，opaque 元素补「目标比例」，如有跨页面复用则在后续页面的复用标注列写 `共享：{文件名}`\n- 图片 → CSS：将「实现方式」设为 `CSS`，「建议文件名」设为 `—`，「目标比例」设为 `—`，清除复用标注\n\n## 共享 UI 素材\n\n| 共享ID | 素材名称 | 建议文件名 | 目标比例（仅 opaque） | 首次出现页面 | 复用页面 |\n|--------|---------|-----------|--------------------|------------|---------|\n| S01 | 地表矿区背景 | mine_surface_bg | 9:16 | RunPage / endless_run | SettlementPage / settlement |\n\n## 游戏物品素材集（asset set，PRD 枚举派生）\n\n> 本节登记由 PRD 数值体系/枚举表派生的领域对象集合。各页面主元素表用到该组时仍占 1 行、`建议文件名`=组前缀；本节定义块负责把组前缀展开为 N 个子素材 key。\n\n### mine_blocks_tiles（矿井棋盘格与提示物，×9）\n\n- 派生公式: terrain/content/marker key ∈ PRD 资源注册表与棋盘编码\n\n| 子素材key | PRD语义名 | 派生维度 | 特效档 |\n|----------|----------|---------|--------|\n| tile_empty_tunnel | EMPTY 坑道格 | empty | normal |\n| tile_wall | WALL 不可敲砖 | wall | normal |\n| tile_sand | sand 沙砖 | sand | normal |\n| tile_ore | ore 矿砖 | ore | glow |\n| tile_blind_box | blindBox 盲盒砖 | blindBox | glow |\n| tile_cover | coverVisible 遮挡层 | cover | normal |\n| tile_chest | chest 宝箱格 | chest | glow |\n| marker_ore_hint | ore hint 矿石提示标记 | ore_hint | glow |\n| marker_tool_hint | tool hint 工具提示标记 | tool_hint | glow |"</script>
+<script id="element-readback-block" type="application/json">"## 视觉数值占位区（READ_BACK 回填）\n\n> 本章节仅保留**场景级** READ_BACK 信息；元素级几何与 CSS 视觉数值直接写回各页面主元素表的 `视觉数值` 列。以下字段在 `visual-skeleton` 阶段**全部留空**，由 `design-read-back` skill 驱动 agent 读 page 图实测后回填；回填完成后清单状态切换为 `visual-verified`。\n\n### TitlePage / title\n\n**场景主色板**：\n\n| hex | role | weight |\n|-----|------|--------|\n| #1A120D | primary_bg | 0.44 |\n| #6B3A1E | secondary_bg | 0.24 |\n| #D88A2A | accent | 0.18 |\n| #FFD35A | text_primary | 0.10 |\n| #2FA9E8 | accent | 0.04 |\n\n**间距栅格基数**: 8px\n\n**出图方式终裁**：\n\n| 元素ID | 初判值 | 终裁值 | 理由 |\n|-------|-----|-------|------|\n| T02 | 并入背景 | 并入背景 | 标题艺术字横跨大半屏宽并与矿洞岩壁、矿车装饰形成整体构图，软阴影和火光较适合烘焙进背景 |\n\n**潜在遗漏（render_suggestion_missing）**：\n\n- 无\n\n**警告**：无\n\n### RunPage / endless_run\n\n**场景主色板**：\n\n| hex | role | weight |\n|-----|------|--------|\n| #21140C | primary_bg | 0.38 |\n| #5B3420 | secondary_bg | 0.22 |\n| #B76E32 | accent | 0.16 |\n| #F2AA34 | accent | 0.12 |\n| #F4D38B | text_primary | 0.08 |\n\n**间距栅格基数**: 8px\n\n**出图方式终裁**：\n\n| 元素ID | 初判值 | 终裁值 | 理由 |\n|-------|-----|-------|------|\n| R13 | 无字底板 | 无字底板 | 深度数值 `128m` 属于运行时变量，必须由代码叠字 |\n| R15 | 无字底板 | 无字底板 | 补给进度 `8/12` 与最右侧补给内容 `补给：木镐+4` 属于运行时变量，必须由代码叠字 |\n| R18 | 无字底板 | 无字底板 | 工具栏承载运行时工具数量与状态文字，底板需无字供代码叠加 |\n| R19 | 无字底板 | 无字底板 | 工具数量 `x20` 属于运行时变量，按钮底板需无字 |\n| R20 | 无字底板 | 无字底板 | 工具数量 `x1` 属于运行时变量，按钮底板需无字 |\n| R21 | 无字底板 | 无字底板 | 工具数量 `x1` 属于运行时变量，按钮底板需无字 |\n\n**潜在遗漏（render_suggestion_missing）**：\n\n- 无\n\n**警告**：asset_set_mixed_fx: mine_blocks_tiles 定义块包含 glow 特效档，design-sheet-asset 需按特效档分桶处理；element_not_visible: R28 Toast 默认态不可见，仅回填预估宿主样式。\n\n### SettlementPage / settlement\n\n**场景主色板**：\n\n| hex | role | weight |\n|-----|------|--------|\n| #24160F | primary_bg | 0.40 |\n| #5A351E | secondary_bg | 0.22 |\n| #F2C56A | text_primary | 0.16 |\n| #D87B31 | accent | 0.12 |\n| #2FA6E8 | accent | 0.06 |\n\n**间距栅格基数**: 8px\n\n**出图方式终裁**：\n\n| 元素ID | 初判值 | 终裁值 | 理由 |\n|-------|-----|-------|------|\n| S02 | 并入背景 | 并入背景 | 结算标题艺术字横跨 72% 宽度并与上方矿镐、蓝晶和背景梁柱构成整体，软阴影适合烘焙进背景 |\n| S03 | 无字底板 | 无字底板 | 面板内包含最深深度、金币、宝石、矿石、宝箱数量等运行时结算数据，必须由代码叠字 |\n\n**潜在遗漏（render_suggestion_missing）**：\n\n- 无\n\n**警告**：无\n\n## 音频资产（可选）\n\n| 音频名称 | 类型 | 建议文件名 | 用途 | 说明 |\n|---------|------|-----------|------|------|\n| 矿井 BGM | BGM | mine_bgm | 主游玩循环背景音乐 | PRD 明确要求，20s |\n| 挖掘命中 | SFX | mine_hit_sfx | 木镐点击命中 | PRD 明确要求 |\n| 方块破坏 | SFX | mine_break_sfx | 砖块碎裂 | PRD 明确要求 |\n| 横排炸弹 | SFX | mine_bomb_row_sfx | 横排爆破 | PRD 明确要求 |\n| 九宫格炸弹 | SFX | mine_bomb_area_sfx | 区域爆破 | PRD 明确要求 |\n| 奖励入账 | SFX | mine_reward_sfx | 奖励入账 | PRD 明确要求 |\n| 深度提升 | SFX | mine_depth_up_sfx | 深度提升反馈 | PRD 明确要求 |"</script>
+<script>
+const TAG_COLS = ['img', 'gamesdk', 'component', 'skill'];
+// 固定枚举列：按列名渲染为下拉框（而非自由文本），避免手填值不一致。
+// 元素类型枚举来源：tapd-visual-read SKILL.md「元素类型」列定义（SSOT）。
+const ENUM_COLS = {
+  '元素类型': ['按钮', '图标', '文本', '图片', '列表项', '未知（VM）'],
+  '实现方式': ['CSS', '图片'],
+  '需要图片素材': ['Y', '—'],
+  '背景透明': [
+    { value: 'opaque', label: '否' },
+    { value: 'transparent', label: '是' },
+    { value: '—', label: '—' },
+  ],
+  '出图方式': [
+    { value: '独立素材', label: '独立素材' },
+    { value: '并入背景', label: '并入背景' },
+    { value: '无字底板', label: '无字底板' },
+    { value: '带字整图', label: '带字整图' },
+    { value: '—', label: '—' },
+  ],
+};
+const REUSE_KINDS = [
+  { value: '—', label: '—' },
+  { value: '共享', label: '共享素材' },
+  { value: '变体组', label: '变体组' },
+  { value: '自定义', label: '自定义' },
+];
+function escHtml(v) { return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+function escAttr(v) { return String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+function enumValue(opt) { return typeof opt === 'string' ? opt : opt.value; }
+function enumLabel(opt) { return typeof opt === 'string' ? opt : opt.label; }
+function enumValues(opts) { return opts.map(enumValue); }
+// <img> 加载失败时隐藏图 + 框浮层，显示占位提示（图未放入 visual-refs/）
+function vizFallback(img) { const sv = img.parentElement; img.style.display = 'none'; const ov = sv.querySelector('.viz-overlay'); if (ov) ov.style.display = 'none'; const ph = sv.querySelector('.viz-placeholder'); if (ph) ph.style.display = 'block'; }
+// 框/标签颜色按还原方式区分
+function methodColor(m) { m = m || ''; if (m.indexOf('切图') >= 0) return '#ff4d4f'; if (m.indexOf('SVG') >= 0) return '#722ed1'; if (m.indexOf('数据层') >= 0) return '#fa8c16'; if (m.indexOf('CSS') >= 0) return '#1677ff'; return '#8c8c8c'; }
+// 「显示全部框」开关：一次显出所有 figma 框，便于扫出没被任何框覆盖的区域（遗漏元素）
+function toggleAllBoxes() {
+  showAll = !showAll;
+  document.querySelectorAll('#app .viz-overlay').forEach(ov => ov.classList.toggle('show-all', showAll));
+  const btn = document.getElementById('toggleBoxesBtn');
+  if (btn) btn.textContent = showAll ? '🔳 隐藏全部框' : '🔲 显示全部框（找遗漏）';
+}
+function toggleVisualValues() {
+  hideVisualValues = !hideVisualValues;
+  document.body.classList.toggle('hide-visual-values', hideVisualValues);
+  const btn = document.getElementById('toggleVisualValuesBtn');
+  if (btn) btn.textContent = hideVisualValues ? '👁️ 显示视觉数值列' : '🙈 隐藏视觉数值列';
+}
+function parseReuseTag(v) {
+  const text = String(v || '').trim();
+  if (!text || text === '—') return { kind: '—', target: '' };
+  const share = text.match(/^共享[:：]s*(.+)?$/);
+  if (share) return { kind: '共享', target: (share[1] || '').trim() };
+  const variant = text.match(/^变体组[:：]s*(.+)?$/);
+  if (variant) return { kind: '变体组', target: (variant[1] || '').trim() };
+  return { kind: '自定义', target: text };
+}
+function buildReuseTag(kind, target) {
+  const t = String(target || '').trim();
+  if (kind === '共享') return t ? '共享：' + t : '共享：';
+  if (kind === '变体组') return t ? '变体组：' + t : '变体组：';
+  if (kind === '自定义') return t || '—';
+  return '—';
+}
+// ===== node 点选指认（figma 映射修正入口）=====
+function sceneCode(si) { const m = (data[si].name || '').match(/\bSC\d+\b/); return m ? m[0] : data[si].name; }
+function startPin(si, eid) {
+  pinning = { si, eid };
+  const sc = document.querySelectorAll('#app .scene')[si];
+  const ov = sc && sc.querySelector('.viz-overlay');
+  if (!ov) { alert('该场景无视觉图 / figma 数据，无法指认'); pinning = null; return; }
+  ov.classList.add('pin-mode');
+  document.getElementById('pinTitle').textContent = '指认 ' + eid + '：点击图中该元素的位置 → 自动挂最贴合的 node；或用右侧操作';
+  document.getElementById('pinBar').classList.add('show');
+  sc.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+function endPin() {
+  document.querySelectorAll('#app .viz-overlay.pin-mode').forEach(ov => ov.classList.remove('pin-mode'));
+  pinning = null;
+  document.getElementById('pinBar').classList.remove('show');
+}
+function setFigma(patch) {
+  if (!pinning) return;
+  const cur = figmaChangeLog.get(pinning.eid) || { scene: sceneCode(pinning.si) };
+  Object.assign(cur, patch);
+  figmaChangeLog.set(pinning.eid, cur);
+}
+function pinAtPoint(si, ov, ev) {
+  if (!pinning || pinning.si !== si) return;
+  const rect = ov.getBoundingClientRect();
+  const cx = (ev.clientX - rect.left) / rect.width * 100, cy = (ev.clientY - rect.top) / rect.height * 100;
+  const nodes = data[si].allNodes || [];
+  const hit = nodes.filter(n => cx >= n.l && cx <= n.l + n.w && cy >= n.t && cy <= n.t + n.h).sort((a, b) => (a.w * a.h) - (b.w * b.h))[0];
+  if (!hit) { alert('该位置没有候选 node，点元素中心再试'); return; }
+  setFigma({ nodeId: hit.id, nodeName: hit.name, unmount: undefined });
+  endPin(); render();
+}
+function pinUnmount() { setFigma({ unmount: true, nodeId: undefined, nodeName: undefined }); endPin(); render(); }
+function pinLock() { setFigma({ locked: true }); endPin(); render(); }
+function pinMethod(v) { if (v) setFigma({ '还原方式': v }); }
+const originalData = JSON.parse(document.getElementById('element-data').textContent);
+let data = JSON.parse(JSON.stringify(originalData));
+// Track: {sceneIdx-rowIdx: {type: 'modified'|'added'|'deleted', origRow, newRow}}
+let changeLog = new Map();
+let figmaChangeLog = new Map(); // eid -> {scene, nodeId?, 还原方式?, unmount?, locked?, nodeName?}  figma 映射类修正（→ remap-apply）
+let pinning = null; // {si, eid} node 指认模式
+let showAll = false; // figma 框「显示全部」开关（找遗漏用）
+let hideVisualValues = true; // 视觉数值列默认隐藏，避免大段 JSON 干扰人工核对
+
+function render() {
+  document.body.classList.toggle('hide-visual-values', hideVisualValues);
+  const btnVisual = document.getElementById('toggleVisualValuesBtn');
+  if (btnVisual) btnVisual.textContent = hideVisualValues ? '👁️ 显示视觉数值列' : '🙈 隐藏视觉数值列';
+  const app = document.getElementById('app');
+  app.innerHTML = data.map((scene, si) => {
+    const tagIndices = TAG_COLS.map(t => scene.headers.indexOf(t));
+    const idIdx = scene.headers.indexOf('元素ID');
+    let vizImg = '';
+    if (scene.visualRef) {
+      // figma 框（默认隐藏，hover 行才显其一）；无 figma 数据时 boxesHtml 为空
+      const boxesHtml = scene.boxes ? Object.keys(scene.boxes).map(eid => {
+        const b = scene.boxes[eid];
+        if (b.degraded || b.l == null) return '';
+        const color = methodColor(b.method);
+        const label = escAttr(eid + (b.nodeName ? ' ' + b.nodeName : '') + (b.method ? ' · ' + b.method : ''));
+        return '<div class="viz-box' + (b.manual ? ' manual' : '') + '" data-eid="' + escAttr(eid) + '" data-box-kind="' + (b.isImage ? 'img' : 'css') + '" style="left:' + b.l + '%;top:' + b.t + '%;width:' + b.w + '%;height:' + b.h + '%;border-color:' + color + '">'
+             + '<span class="viz-box-label" style="background:' + color + '">' + label + (b.manual ? ' 🔒' : '') + '</span></div>';
+      }).join('') : '';
+      // 始终输出 <img> 实时加载，放图后刷新即生效（不依赖生成时 existsSync）；失败 → onerror 切占位
+      vizImg = '<div class="scene-visual"><img src="' + escAttr(scene.visualRef) + '" alt="' + escAttr(scene.name) + '" onerror="vizFallback(this)" />'
+             + '<div class="viz-overlay">' + boxesHtml + '<div class="viz-note"></div></div>'
+             + '<div class="viz-placeholder" style="display:none">📷 未找到 page 图: ' + escAttr(scene.visualRef) + '</div></div>';
+    }
+    return `<div class="scene ${vizImg ? 'has-visual' : ''}">
+      <div class="scene-main">
+      <div class="scene-header">
+        <div class="scene-title">${scene.name}</div>
+        <button class="btn btn-green" onclick="addRow(${si})">+ 添加元素</button>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr>${scene.headers.map(h => '<th class="' + (h === '视觉数值' ? 'visual-value-col' : '') + '">' + h + '</th>').join('')}<th>操作</th></tr></thead>
+        <tbody>${scene.rows.map((row, ri) => {
+          const key = si + '-' + ri;
+          const change = changeLog.get(key);
+          const cls = change ? change.type : '';
+          const tags = TAG_COLS.filter((_, i) => {
+            const v = row[tagIndices[i]];
+            return v && v !== '—';
+          });
+          const implVal = row[scene.headers.indexOf('实现方式')] || '';
+          const mergeVal = row[scene.headers.indexOf('出图方式')] || '';
+          const needImgVal = row[scene.headers.indexOf('需要图片素材')] || '';
+          const fileVal = row[scene.headers.indexOf('建议文件名')] || '';
+          const visualVal = row[scene.headers.indexOf('视觉数值')] || '';
+          if (/图片|image/i.test(implVal) || needImgVal === 'Y' || (fileVal && fileVal !== '—')) tags.push('img');
+          if (/CSS/i.test(implVal)) tags.push('css');
+          if (/并入背景/.test(mergeVal)) tags.push('merge');
+          if (/warning|shape_mismatch|severe|uncertain|VMd+/i.test(row.join(' ') + ' ' + visualVal)) tags.push('warning');
+          if (tags.length === 0) tags.push('css');
+          // 待处理标记：含 uncertain / VM### 缺图项 / 元素类型为「未知（VM）」的行
+          const rowJoined = row.join(' ');
+          const attn = (/uncertain/i.test(rowJoined)
+            || /\bVM\d+/i.test(rowJoined)
+            || row.some((c, ci2) => scene.headers[ci2] === '元素类型' && String(c || '').trim() === '未知（VM）')) ? '1' : '';
+          const eid = idIdx >= 0 ? (row[idIdx] || '').trim() : '';
+          const fcls = figmaChangeLog.has(eid) ? ' figma-edited' : '';
+          return `<tr class="${cls}${fcls}" data-tags="${tags.join(' ')}" data-key="${key}" data-attn="${attn}" data-eid="${escAttr(eid)}">
+            ${row.map((cell, ci) => {
+              const header = scene.headers[ci];
+              const enumOpts = ENUM_COLS[header];
+              if (enumOpts) {
+                const cur = (cell || '').trim();
+                const values = enumValues(enumOpts);
+                const inEnum = values.includes(cur);
+                const hasDashOpt = values.includes('—');
+                let opts = '';
+                // 枚举本身未把「—」作正式选项时，补一个空值「—」用于清空（如元素类型）
+                if (!hasDashOpt) opts += '<option value=""' + (cur === '' ? ' selected' : '') + '>—</option>';
+                if (cur && !inEnum) opts += '<option value="' + escAttr(cur) + '" selected>' + escHtml(cur) + '（非标准）</option>';
+                // 枚举含「—」且当前为空时，默认选中「—」
+                const selVal = (hasDashOpt && cur === '') ? '—' : cur;
+                opts += enumOpts.map(o => {
+                  const value = enumValue(o);
+                  const label = enumLabel(o);
+                  return '<option value="' + escAttr(value) + '"' + (value === selVal ? ' selected' : '') + '>' + escHtml(label) + '</option>';
+                }).join('');
+                return '<td class="enum-col ' + (header === '视觉数值' ? 'visual-value-col' : '') + '"><select onchange="editCell(' + si + ',' + ri + ',' + ci + ',this.value)">' + opts + '</select></td>';
+              }
+              if (header === '复用标注') {
+                const reuse = parseReuseTag(cell);
+                const opts = REUSE_KINDS.map(o => '<option value="' + escAttr(o.value) + '"' + (o.value === reuse.kind ? ' selected' : '') + '>' + escHtml(o.label) + '</option>').join('');
+                const disabled = reuse.kind === '—' ? ' disabled' : '';
+                const placeholder = reuse.kind === '共享' ? '如 icon_coin.png' : (reuse.kind === '变体组' ? '如 E01' : '输入标注');
+                return '<td class="reuse-col"><div class="reuse-editor"><select onchange="editReuseKind(' + si + ',' + ri + ',' + ci + ',this.value)">' + opts + '</select><input value="' + escAttr(reuse.target) + '" placeholder="' + escAttr(placeholder) + '" onchange="editReuseTarget(' + si + ',' + ri + ',' + ci + ',this.value)"' + disabled + ' /></div></td>';
+              }
+              const isTagCol = tagIndices.includes(ci);
+              const isFilled = cell && cell !== '—';
+              const tdClass = (isTagCol ? (isFilled ? 'tag-col-has' : 'tag-col-none') : '') + (header === '视觉数值' ? ' visual-value-col' : '');
+              const displayCell = cell || (isTagCol ? '—' : '');
+              return '<td class="' + tdClass + '"><textarea rows="1" onchange="editCell(' + si + ',' + ri + ',' + ci + ',this.value)" oninput="autoResize(this)">' + escHtml(displayCell) + '</textarea></td>';
+            }).join('')}
+            <td class="row-actions">
+              <button onclick="deleteRow(${si},${ri})" title="删除">🗑️</button>
+              <button onclick="duplicateRow(${si},${ri})" title="复制">📋</button>
+              ${(scene.allNodes && eid) ? '<button onclick="startPin(' + si + ',&quot;' + eid + '&quot;)" title="指认/纠正 figma node">🎯</button>' : ''}
+            </td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>
+      </div>
+      ${vizImg}
+    </div>`;
+  }).join('');
+  updateBadge();
+  // 重新应用当前筛选
+  const activeFilter = document.querySelector('.filter-btn.active');
+  if (activeFilter) applyFilter(activeFilter.dataset.filter);
+  // 自适应 textarea 高度
+  document.querySelectorAll('#app textarea').forEach(el => autoResize(el));
+
+  // figma 框 ↔ 元素行 hover 联动（无 figma 数据 → 无 .viz-box，自然不触发）
+  document.querySelectorAll('#app .scene').forEach((sc, si) => {
+    const ov = sc.querySelector('.viz-overlay');
+    if (!ov) return;
+    ov.addEventListener('click', (ev) => { if (ov.classList.contains('pin-mode')) pinAtPoint(si, ov, ev); });
+    const note = ov.querySelector('.viz-note');
+    const clearBoxes = () => { ov.querySelectorAll('.viz-box.show').forEach(b => b.classList.remove('show')); if (note) note.classList.remove('show'); };
+    sc.querySelectorAll('tr[data-eid]').forEach(tr => {
+      const eid = tr.getAttribute('data-eid');
+      if (!eid) return;
+      tr.addEventListener('mouseenter', () => {
+        clearBoxes();
+        const box = ov.querySelector('.viz-box[data-eid="' + eid + '"]');
+        if (box) box.classList.add('show');
+        else if (note) { note.textContent = '⚠ ' + eid + ' 未定位（matcher 未匹配 / 无 figma node）'; note.classList.add('show'); }
+      });
+      tr.addEventListener('mouseleave', clearBoxes);
+    });
+    ov.querySelectorAll('.viz-box').forEach(box => {
+      const eid = box.getAttribute('data-eid');
+      box.addEventListener('mouseenter', () => { const tr = sc.querySelector('tr[data-eid="' + eid + '"]'); if (tr) tr.classList.add('viz-hover'); });
+      box.addEventListener('mouseleave', () => { const tr = sc.querySelector('tr[data-eid="' + eid + '"]'); if (tr) tr.classList.remove('viz-hover'); });
+    });
+  });
+  // 重渲后保持「显示全部框」状态（overlay 被 innerHTML 重建过）
+  if (showAll) document.querySelectorAll('#app .viz-overlay').forEach(ov => ov.classList.add('show-all'));
+}
+
+function editCell(si, ri, ci, val) {
+  // 维度列空值统一回写为 —
+  const headers = data[si].headers;
+  const isTagCol = TAG_COLS.includes(headers[ci]);
+  data[si].rows[ri][ci] = isTagCol && val.trim() === '' ? '—' : val;
+  // 元素类型改为「图片」→ 自动把「需要图片素材」置 Y（联动改值后需重渲染刷新该下拉框）
+  let autoChanged = false;
+  if (headers[ci] === '元素类型' && val === '图片') {
+    const needIdx = headers.indexOf('需要图片素材');
+    if (needIdx >= 0 && data[si].rows[ri][needIdx] !== 'Y') {
+      data[si].rows[ri][needIdx] = 'Y';
+      autoChanged = true;
+    }
+  }
+  markModified(si, ri);
+  // 维度列 / 枚举列内容变化 / 联动改值需要重渲染（更新 td 高亮 + 行 data-tags + 联动下拉框）
+  if (isTagCol || ENUM_COLS[headers[ci]] || autoChanged) {
+    render();
+  } else {
+    updateBadge();
+    const tr = document.querySelector('[data-key="' + si + '-' + ri + '"]');
+    if (tr && !tr.classList.contains('added')) tr.classList.add('modified');
+  }
+}
+
+function editReuseKind(si, ri, ci, kind) {
+  const current = parseReuseTag(data[si].rows[ri][ci]);
+  editCell(si, ri, ci, buildReuseTag(kind, current.target));
+  render();
+}
+
+function editReuseTarget(si, ri, ci, target) {
+  const current = parseReuseTag(data[si].rows[ri][ci]);
+  editCell(si, ri, ci, buildReuseTag(current.kind, target));
+}
+
+function markModified(si, ri) {
+  const key = si + '-' + ri;
+  if (changeLog.has(key) && changeLog.get(key).type === 'added') return; // 新增行不标modified
+  const orig = originalData[si] && originalData[si].rows[ri];
+  if (!orig) return;
+  const changed = JSON.stringify(data[si].rows[ri]) !== JSON.stringify(orig);
+  if (changed) {
+    changeLog.set(key, { type: 'modified', orig, newRow: data[si].rows[ri] });
+  } else {
+    changeLog.delete(key);
+  }
+}
+
+function addRow(si) {
+  const headers = data[si].headers;
+  // 维度列 / 含「—」选项的枚举列（如需要图片素材）默认填「—」，与下拉框默认显示一致
+  const newRow = headers.map(h => (TAG_COLS.includes(h) || h === '复用标注' || (ENUM_COLS[h] && enumValues(ENUM_COLS[h]).includes('—'))) ? '—' : '');
+  // 自动填元素ID
+  const idIdx = headers.indexOf('元素ID');
+  if (idIdx >= 0) {
+    const maxId = data[si].rows.reduce((max, r) => {
+      const m = r[idIdx].match(/E(\d+)/);
+      return m ? Math.max(max, parseInt(m[1])) : max;
+    }, 0);
+    newRow[idIdx] = 'E' + String(maxId + 1).padStart(2, '0');
+  }
+  data[si].rows.push(newRow);
+  const ri = data[si].rows.length - 1;
+  changeLog.set(si + '-' + ri, { type: 'added', newRow });
+  render();
+}
+
+function deleteRow(si, ri) {
+  const key = si + '-' + ri;
+  const existing = changeLog.get(key);
+  if (existing && existing.type === 'added') {
+    // 新增的直接删
+    data[si].rows.splice(ri, 1);
+    changeLog.delete(key);
+    // 重建 changeLog keys
+    rebuildKeys(si);
+  } else {
+    changeLog.set(key, { type: 'deleted', orig: originalData[si].rows[ri] });
+    data[si].rows[ri]._deleted = true;
+  }
+  render();
+}
+
+function duplicateRow(si, ri) {
+  const copy = [...data[si].rows[ri]];
+  const idIdx = data[si].headers.indexOf('元素ID');
+  if (idIdx >= 0) {
+    const maxId = data[si].rows.reduce((max, r) => {
+      const m = (r[idIdx] || '').match(/E(\d+)/);
+      return m ? Math.max(max, parseInt(m[1])) : max;
+    }, 0);
+    copy[idIdx] = 'E' + String(maxId + 1).padStart(2, '0');
+  }
+  data[si].rows.splice(ri + 1, 0, copy);
+  rebuildKeys(si);
+  const newRi = ri + 1;
+  changeLog.set(si + '-' + newRi, { type: 'added', newRow: copy });
+  render();
+}
+
+function rebuildKeys(si) {
+  const newLog = new Map();
+  for (const [k, v] of changeLog) {
+    const [s, r] = k.split('-').map(Number);
+    if (s === si) continue; // 该 scene 的全部重建
+    newLog.set(k, v);
+  }
+  // 重建该 scene
+  data[si].rows.forEach((row, ri) => {
+    const orig = originalData[si] && originalData[si].rows[ri];
+    if (!orig) {
+      newLog.set(si + '-' + ri, { type: 'added', newRow: row });
+    } else if (JSON.stringify(row) !== JSON.stringify(orig)) {
+      newLog.set(si + '-' + ri, { type: 'modified', orig, newRow: row });
+    }
+  });
+  changeLog = newLog;
+}
+
+function updateBadge() {
+  const count = changeLog.size + figmaChangeLog.size;
+  const badge = document.getElementById('changeBadge');
+  badge.style.display = count > 0 ? 'inline' : 'none';
+  badge.textContent = count;
+}
+
+function exportChanges() {
+  if (changeLog.size === 0 && figmaChangeLog.size === 0) { alert('无变更'); return; }
+  let text = '# 设计-元素实现清单 变更记录\n\n';
+  for (const [key, entry] of changeLog) {
+    const [si, ri] = key.split('-').map(Number);
+    const scene = data[si].name;
+    const headers = data[si].headers;
+    if (entry.type === 'added') {
+      const id = entry.newRow[headers.indexOf('元素ID')] || '新元素';
+      text += '【新增】' + scene + ' / ' + id + '\n';
+      headers.forEach((h, i) => { if (entry.newRow[i] && entry.newRow[i] !== '—') text += '  ' + h + ': ' + entry.newRow[i] + '\n'; });
+      text += '\n';
+    } else if (entry.type === 'deleted') {
+      const id = entry.orig[headers.indexOf('元素ID')] || '?';
+      text += '【删除】' + scene + ' / ' + id + '\n\n';
+    } else if (entry.type === 'modified') {
+      const id = entry.newRow[headers.indexOf('元素ID')] || entry.orig[headers.indexOf('元素ID')];
+      text += '【修改】' + scene + ' / ' + id + '\n';
+      headers.forEach((h, i) => {
+        if (entry.orig[i] !== entry.newRow[i]) text += '  ' + h + ': ' + entry.orig[i] + ' → ' + entry.newRow[i] + '\n';
+      });
+      text += '\n';
+    }
+  }
+  if (figmaChangeLog.size) {
+    text += '\n# 设计-figma映射 修正\n';
+    for (const [eid, c] of figmaChangeLog) {
+      const parts = [];
+      if (c.unmount) parts.push('取消挂载');
+      else if (c.nodeId) parts.push('node=' + c.nodeId);
+      if (c['还原方式']) parts.push('还原方式=' + c['还原方式']);
+      if (c.locked && !c.nodeId && !c.unmount) parts.push('锁定');
+      if (parts.length) text += (c.scene || '') + ' ' + eid + ' → ' + parts.join(' ') + (c.nodeName ? '   # ' + c.nodeName : '') + '\n';
+    }
+  }
+  showModal('变更记录', text);
+}
+
+function exportFullMd() {
+  let md = '';
+  const preEl = document.getElementById('element-preamble');
+  const pre = preEl ? JSON.parse(preEl.textContent) : '';
+  if (pre) md += pre + '\n\n';
+  data.forEach(scene => {
+    md += '#'.repeat(scene.level || 2) + ' ' + scene.name + '\n';
+    if (scene.visualMdRef) md += '> 视觉图: ' + scene.visualMdRef + '\n';
+    md += '\n';
+    md += '| ' + scene.headers.join(' | ') + ' |\n';
+    md += '|' + scene.headers.map(() => '---').join('|') + '|\n';
+    scene.rows.forEach(row => {
+      if (row._deleted) return;
+      md += '| ' + row.map(c => c || '—').join(' | ') + ' |\n';
+    });
+    md += '\n';
+  });
+  const rbEl = document.getElementById('element-readback-block');
+  const rb = rbEl ? JSON.parse(rbEl.textContent) : '';
+  if (rb) md += rb + '\n';
+  showModal('完整 MD（可直接覆盖 设计-元素实现清单.md）', md);
+}
+
+function showModal(title, content) {
+  document.getElementById('modalTitle').textContent = title;
+  document.getElementById('modalContent').textContent = content;
+  document.getElementById('modal').classList.add('show');
+}
+function closeModal() { document.getElementById('modal').classList.remove('show'); }
+function copyModal() {
+  navigator.clipboard.writeText(document.getElementById('modalContent').textContent).then(() => alert('已复制'));
+}
+
+function resetAll() {
+  if (!confirm('确定重置所有修改？')) return;
+  data = JSON.parse(JSON.stringify(originalData));
+  changeLog.clear();
+  figmaChangeLog.clear();
+  render();
+}
+
+// 筛选
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    applyFilter(btn.dataset.filter);
+  });
+});
+
+function autoResize(el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; }
+
+// TODO 顶栏「前往」动作：与点击「⚠ 待处理 uncertain/VM」筛选按钮表现一致
+function filterUncertainVM() {
+  const btn = document.querySelector('.filter-btn[data-filter="uncertain-vm"]');
+  if (!btn) return;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  applyFilter('uncertain-vm');
+  btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function applyFilter(filter) {
+  document.querySelectorAll('#app .viz-overlay').forEach(ov => {
+    ov.classList.remove('show-filtered');
+    ov.querySelectorAll('.viz-box.filtered-visible').forEach(b => b.classList.remove('filtered-visible'));
+  });
+  document.querySelectorAll('#app tbody tr').forEach(tr => {
+    if (filter === 'all') { tr.classList.remove('hidden'); return; }
+    if (filter === 'modified') { tr.classList.toggle('hidden', !changeLog.has(tr.dataset.key)); return; }
+    if (filter === 'uncertain-vm') { tr.classList.toggle('hidden', tr.dataset.attn !== '1'); return; }
+    const normalized = filter === 'img-boxes' ? 'img' : filter;
+    tr.classList.toggle('hidden', !(tr.dataset.tags || '').includes(normalized));
+  });
+  if (filter === 'img-boxes') {
+    document.querySelectorAll('#app .scene').forEach(sc => {
+      const ov = sc.querySelector('.viz-overlay');
+      if (!ov) return;
+      ov.classList.add('show-filtered');
+      sc.querySelectorAll('tr[data-eid]:not(.hidden)').forEach(tr => {
+        const eid = tr.getAttribute('data-eid');
+        const box = ov.querySelector('.viz-box[data-eid="' + eid + '"]');
+        if (box && box.dataset.boxKind === 'img') box.classList.add('filtered-visible');
+      });
+    });
+  }
+}
+
+render();
+</script>
+</body>
+</html>

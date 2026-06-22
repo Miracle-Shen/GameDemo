@@ -1,0 +1,18 @@
+.title-page {
+  &__start {
+    cursor: pointer;
+    touch-action: manipulation;
+
+    img {
+      width: 503px;
+      height: 185px;
+      display: block;
+      object-fit: contain;
+    }
+
+    &.is-loading {
+      pointer-events: none;
+      filter: brightness(0.82);
+    }
+  }
+}

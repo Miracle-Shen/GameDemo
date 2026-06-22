@@ -1,0 +1,33 @@
+{
+  "source": "BATCH_IMG_GEN",
+  "generated_at": "2026-06-21T11:26:35.128Z",
+  "pages": [
+    {
+      "scene_id": "title",
+      "file_name": "page_title.webp",
+      "local_path": "assets/refs/design-sheets/page_title.webp",
+      "image_url": "https://game.kg.qq.com/walle-img-gen/output/7RCUy8W6hfXsvRut-aI87.png",
+      "mime_type": "image/webp",
+      "task_id": "I7b8pRXb0XzjC5y0RHTw5",
+      "model": "gpt-image-2"
+    },
+    {
+      "scene_id": "endless_run",
+      "file_name": "page_endless_run.webp",
+      "local_path": "assets/refs/design-sheets/page_endless_run.webp",
+      "image_url": "https://game.kg.qq.com/walle-img-gen/output/DTigFYDTWMy8WLIKlsNY6.png",
+      "mime_type": "image/webp",
+      "task_id": "BDf7aYuXNaA-N3dOYeoxq",
+      "model": "gpt-image-2"
+    },
+    {
+      "scene_id": "settlement",
+      "file_name": "page_settlement.webp",
+      "local_path": "assets/refs/design-sheets/page_settlement.webp",
+      "image_url": "https://game.kg.qq.com/walle-img-gen/output/U_TGAXSrGvJgZhQ9tD1qm.png",
+      "mime_type": "image/webp",
+      "task_id": "_XX15X2A-kMaeJa9jx9oK",
+      "model": "gpt-image-2"
+    }
+  ]
+}
